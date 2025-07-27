@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras.models import load_model
+from tensorflow.keras.models import load_model, Model
 from tensorflow.keras.layers import Input, Conv1D, MaxPooling1D, GlobalAveragePooling1D, Dense, Dropout, BatchNormalization
 from tensorflow.keras.regularizers import l2
 from sklearn.preprocessing import StandardScaler, LabelEncoder
@@ -30,7 +30,7 @@ st.markdown("""
         background-color: #f0f2f6 !important;
     }
     .main {
-        background-color: #black !important;
+        background-color: #f0f2f6 !important;
     }
     .stButton>button {
         background-color: #4CAF50 !important;
@@ -109,6 +109,7 @@ if page == "Data Exploration":
             plt.ylabel("Flux")
             plt.legend()
             st.pyplot(plt)
+            plt.close()  # Added to clear figure
     else:
         st.write("Summary data for XGBoost model")
         st.write(summary_data.head())
@@ -121,6 +122,7 @@ if page == "Data Exploration":
             plt.xlabel(feature)
             plt.ylabel("Count")
             st.pyplot(plt)
+            plt.close()  # Added to clear figure
 
 elif page == "Model Training":
     st.title("Model Training")
@@ -196,6 +198,7 @@ elif page == "Model Training":
             plt.ylabel('Loss')
             plt.legend()
             st.pyplot(plt)
+            plt.close()  # Added to clear figure
     
     else:
         st.subheader("XGBoost Model")
@@ -252,6 +255,7 @@ elif page == "Model Training":
             plt.figure(figsize=(10, 4))
             shap.summary_plot(shap_values, X_test_xgb, feature_names=st.session_state.features_to_use, show=False)
             st.pyplot(plt)
+            plt.close()  # Added to clear figure
 
 elif page == "Predictions":
     st.title("Exoplanet Predictions")
