@@ -10,3 +10,4 @@ xgboost==1.7.6
 requests==2.31.0
 gdown==4.7.1
 dill==0.3.6
+joblib==1.2.0
