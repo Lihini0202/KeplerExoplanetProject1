@@ -7,6 +7,7 @@ from plotly.subplots import make_subplots
 import matplotlib as mpl
 import os
 import requests
+import io  # Required for handling in-memory file
 import tensorflow as tf
 from tensorflow.keras.models import load_model
 import joblib
@@ -35,7 +36,6 @@ def initialize_session_state():
         'scaler_xgb': None,
         'label_encoder': None,
         'features_to_use': None,
-        'num_classes': None,
         'prediction_results': None
     }
     for var, default in session_vars.items():
@@ -94,26 +94,6 @@ def setup_page_config():
             background-color: {COLOR_PALETTE['starry_white']} !important;
             color: {COLOR_PALETTE['dark_slate']} !important;
         }}
-        .stDataFrame {{
-            border-radius: 8px;
-            background-color: {COLOR_PALETTE['dark_slate']} !important;
-            color: {COLOR_PALETTE['starry_white']} !important;
-        }}
-        .plot-container {{
-            border-radius: 8px;
-            background-color: {COLOR_PALETTE['dark_slate']} !important;
-            color: {COLOR_PALETTE['starry_white']} !important;
-            padding: 20px;
-        }}
-        .metric-card {{
-            background-color: {COLOR_PALETTE['dark_slate']} !important;
-            color: {COLOR_PALETTE['starry_white']} !important;
-            border-radius: 8px;
-            padding: 15px;
-        }}
-        h1, h2, h3, h4, h5, h6, p, div, span {{
-            color: {COLOR_PALETTE['starry_white']} !important;
-        }}
         </style>
     """, unsafe_allow_html=True)
 
@@ -129,70 +109,71 @@ def focal_loss(gamma=2.0, alpha=0.5):
         return tf.reduce_mean(alpha_t * focal_factor * bce)
     return focal_loss_fixed
 
+# Function to download large files from Google Drive
+def download_gdrive_file(url):
+    """Downloads a large file from Google Drive that has a virus scan warning page."""
+    with requests.Session() as session:
+        # Initial request to get the confirmation token
+        response = session.get(url, stream=True)
+        token = None
+        for key, value in response.cookies.items():
+            if key.startswith('download_warning'):
+                token = value
+        
+        # Second request with the token to start the download
+        if token:
+            params = {'confirm': token}
+            response = session.get(url, params=params, stream=True)
+        
+        # Read the content
+        file_content = response.content
+        return file_content
+
 # Load datasets
 @st.cache_data(show_spinner="Loading datasets...")
 def load_data():
-    """Load and cache datasets with error handling"""
+    """Load and cache datasets, handling large files from Google Drive correctly."""
     try:
-        # Load exoTrain.csv from Google Drive
-        primary_url = "https://drive.google.com/uc?export=download&id=1MxDUIqQ6S9cmi068I62xkbCwZHkpAeJI"
-        st.write("Checking accessibility of exoTrain.csv...")
-        response = requests.head(primary_url, allow_redirects=True)
-        if response.status_code != 200:
-            raise Exception(f"Failed to access Google Drive URL (status code: {response.status_code}). Ensure the file is set to 'Anyone with the link'.")
-
-        st.write("Loading exoTrain.csv from Google Drive...")
-        raw_data = pd.read_csv(primary_url)
-        st.session_state.raw_data = raw_data
-        st.session_state.data_loaded = True
-        st.success("exoTrain.csv loaded successfully!")
+        if 'raw_data' not in st.session_state or st.session_state.raw_data is None:
+            with st.spinner("Downloading exoTrain.csv from Google Drive... (This may take a moment)"):
+                primary_url = "https://drive.google.com/uc?export=download&id=1MxDUIqQ6S9cmi068I62xkbCwZHkpAeJI"
+                file_content = download_gdrive_file(primary_url)
+                # Use io.BytesIO to read the downloaded content directly into pandas
+                raw_data = pd.read_csv(io.BytesIO(file_content))
+                st.session_state.raw_data = raw_data
+            st.success("exoTrain.csv loaded successfully!")
+        
+        raw_data = st.session_state.raw_data
 
         # Attempt to load cumulative.csv (optional)
         summary_data = None
-        # This path assumes the 'datasets' folder is in the same directory as the script.
-        # Update path if your directory structure is different.
         summary_path = "cumulative.csv" 
         if os.path.exists(summary_path):
-            st.write("Loading cumulative.csv from repository...")
             summary_data = pd.read_csv(summary_path)
             st.session_state.summary_data = summary_data
-            st.success("cumulative.csv loaded successfully!")
         else:
-            st.warning("cumulative.csv not found in the root directory. Summary data features will be disabled.")
+            st.sidebar.warning("`cumulative.csv` not found. Summary data features will be disabled.")
 
+        st.session_state.data_loaded = True
         return raw_data, summary_data
+        
     except Exception as e:
         st.error(f"Failed to load datasets: {e}")
         st.session_state.data_loaded = False
         return None, None
 
+
 # Load CNN model
 def load_cnn_model():
-    """Safely load CNN model with memory cleanup"""
+    """Safely load a pre-trained CNN model and its scaler."""
     try:
-        tf.keras.backend.clear_session()
-        # Placeholder: Replace with actual Google Drive URL for the model
-        model_url = "YOUR_CNN_MODEL_GOOGLE_DRIVE_URL"
         model_path = "cnn_exoplanet_model.keras"
-        # The following block is a placeholder for downloading the model from a URL
-        # if model_url != "YOUR_CNN_MODEL_GOOGLE_DRIVE_URL":
-        #     response = requests.get(model_url)
-        #     with open(model_path, 'wb') as f:
-        #         f.write(response.content)
+        scaler_path = "scaler_cnn.pkl"
 
         st.session_state.cnn_model = load_model(
             model_path,
             custom_objects={'focal_loss_fixed': focal_loss(gamma=2.0, alpha=0.5)}
         )
-        
-        # Placeholder: Replace with actual Google Drive URL for the scaler
-        scaler_url = "YOUR_SCALER_CNN_GOOGLE_DRIVE_URL"
-        scaler_path = "scaler_cnn.pkl"
-        # if scaler_url != "YOUR_SCALER_CNN_GOOGLE_DRIVE_URL":
-        #     response = requests.get(scaler_url)
-        #     with open(scaler_path, 'wb') as f:
-        #         f.write(response.content)
-        
         st.session_state.scaler_cnn = joblib.load(scaler_path)
         st.success("CNN model and scaler loaded successfully!")
         return True
@@ -202,29 +183,13 @@ def load_cnn_model():
 
 # Load XGBoost model
 def load_xgb_model():
-    """Safely load XGBoost model with components"""
+    """Safely load a pre-trained XGBoost model and its components."""
     try:
-        # Placeholder: Replace with actual Google Drive URL for the model
-        model_url = "YOUR_XGB_MODEL_GOOGLE_DRIVE_URL"
-        model_path = "xgb_model.pkl"
-        st.session_state.xgb_model = joblib.load(model_path)
+        st.session_state.xgb_model = joblib.load("xgb_model.pkl")
+        st.session_state.scaler_xgb = joblib.load("scaler_xgb.pkl")
+        st.session_state.label_encoder = joblib.load("label_encoder.pkl")
+        st.session_state.features_to_use = joblib.load("features_to_use.pkl")
         
-        # Placeholder: Replace with actual Google Drive URL for the scaler
-        scaler_url = "YOUR_SCALER_XGB_GOOGLE_DRIVE_URL"
-        scaler_path = "scaler_xgb.pkl"
-        st.session_state.scaler_xgb = joblib.load(scaler_path)
-
-        # Placeholder: Replace with actual Google Drive URL for the encoder
-        encoder_url = "YOUR_LABEL_ENCODER_GOOGLE_DRIVE_URL"
-        encoder_path = "label_encoder.pkl"
-        st.session_state.label_encoder = joblib.load(encoder_path)
-
-        # Placeholder: Replace with actual Google Drive URL for features
-        features_url = "YOUR_FEATURES_TO_USE_GOOGLE_DRIVE_URL"
-        features_path = "features_to_use.pkl"
-        st.session_state.features_to_use = joblib.load(features_path)
-        
-        st.session_state.num_classes = len(st.session_state.label_encoder.classes_)
         st.success("XGBoost model and components loaded successfully!")
         return True
     except Exception as e:
@@ -233,55 +198,38 @@ def load_xgb_model():
 
 # Light curve visualization
 def plot_light_curves(data, n_samples=5, label_col='LABEL'):
-    """Visualize sample light curves with space-themed palette"""
+    """Visualize sample light curves with a space-themed palette"""
     try:
         if label_col not in data.columns:
             st.warning(f"Column '{label_col}' not found. Skipping exoplanet/non-exoplanet differentiation.")
             samples = data.sample(n=min(n_samples, len(data)))
-            fig_plotly = make_subplots(rows=1, cols=1, subplot_titles=("Sample Light Curves",))
+            fig = make_subplots(rows=1, cols=1, subplot_titles=("Sample Light Curves",))
             
             for idx, row in samples.iterrows():
-                fig_plotly.add_trace(
-                    go.Scatter(
-                        x=list(range(len(row))), y=row, mode='lines', name=f'Star {idx}',
-                        line=dict(color=COLOR_PALETTE['nebula_purple'])
-                    ), row=1, col=1
-                )
+                fig.add_trace(go.Scatter(y=row, mode='lines', name=f'Star {idx}', line=dict(color=COLOR_PALETTE['nebula_purple'])), row=1, col=1)
         else:
             exoplanet_data = data[data[label_col] == 2]
             non_exoplanet_data = data[data[label_col] == 1]
-
             exoplanet_samples = exoplanet_data.sample(n=min(n_samples, len(exoplanet_data)))
             non_exoplanet_samples = non_exoplanet_data.sample(n=min(n_samples, len(non_exoplanet_data)))
             
-            fig_plotly = make_subplots(rows=1, cols=2, subplot_titles=("Exoplanet Stars", "Non-Exoplanet Stars"))
+            fig = make_subplots(rows=1, cols=2, subplot_titles=("Exoplanet Stars", "Non-Exoplanet Stars"))
             
             for idx, row in exoplanet_samples.iterrows():
-                fig_plotly.add_trace(
-                    go.Scatter(
-                        x=list(range(len(row[1:]))), y=row[1:], mode='lines', name=f'Exoplanet Star {idx}',
-                        line=dict(color=COLOR_PALETTE['nebula_purple'])
-                    ), row=1, col=1
-                )
+                fig.add_trace(go.Scatter(y=row[1:], mode='lines', name=f'Exoplanet {idx}', line=dict(color=COLOR_PALETTE['nebula_purple'])), row=1, col=1)
             
             for idx, row in non_exoplanet_samples.iterrows():
-                fig_plotly.add_trace(
-                    go.Scatter(
-                        x=list(range(len(row[1:]))), y=row[1:], mode='lines', name=f'Non-Exoplanet Star {idx}',
-                        line=dict(color=COLOR_PALETTE['starry_white'])
-                    ), row=1, col=2
-                )
+                fig.add_trace(go.Scatter(y=row[1:], mode='lines', name=f'Non-Exoplanet {idx}', line=dict(color=COLOR_PALETTE['starry_white'])), row=1, col=2)
         
-        fig_plotly.update_layout(
+        fig.update_layout(
             height=400, showlegend=False, margin=dict(l=20, r=20, t=40, b=20),
             paper_bgcolor=COLOR_PALETTE['dark_slate'], plot_bgcolor=COLOR_PALETTE['dark_slate'],
             font=dict(color=COLOR_PALETTE['starry_white'])
         )
+        fig.update_xaxes(title_text="Time", title_font=dict(color=COLOR_PALETTE['starry_white']))
+        fig.update_yaxes(title_text="Flux", title_font=dict(color=COLOR_PALETTE['starry_white']))
         
-        fig_plotly.update_xaxes(title_text="Time", title_font=dict(color=COLOR_PALETTE['starry_white']))
-        fig_plotly.update_yaxes(title_text="Flux", title_font=dict(color=COLOR_PALETTE['starry_white']))
-        
-        return fig_plotly
+        return fig
     except Exception as e:
         st.error(f"Error generating light curves: {e}")
         return None
@@ -291,27 +239,19 @@ def landing_page(raw_data):
     """Render the landing page"""
     st.title("🌌 Exoplanet Detection Dashboard")
     st.markdown("""
-    ## Discover Exoplanets Through Data
-    
-    This interactive dashboard allows you to:
-    - Explore exoplanet light curve data
-    - Visualize light curves and dataset statistics
-    - Make predictions with pre-trained models (if available)
-    
-    ### Key Features:
-    🔭 **Data Exploration**: View light curves and exoplanet characteristics  
-    🔮 **Predictions**: Classify new observations (requires pre-trained models)  
-    💬 **Feedback**: Share your suggestions for improvement
+    ### Discover Exoplanets Through Data
+    This interactive dashboard allows you to explore the fascinating world of exoplanets using data from the Kepler Space Telescope.
+    - **Data Exploration**: View light curves and statistical properties of stars.
+    - **Predictions**: Use pre-trained Machine Learning models to classify potential exoplanets.
+    - **Feedback**: Share your suggestions for improvement.
     
     *Navigate using the sidebar to get started!*
     """)
     
     if raw_data is not None:
-        fig_plotly = plot_light_curves(raw_data, 2)
-        if fig_plotly:
-            st.plotly_chart(fig_plotly, use_container_width=True)
-        else:
-            st.warning("Failed to generate sample light curves.")
+        fig = plot_light_curves(raw_data, n_samples=3)
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
     else:
         st.error("Dataset not loaded. Please check the data source.")
 
@@ -321,7 +261,7 @@ def data_exploration_page(raw_data, summary_data):
     st.title("📊 Data Exploration")
     st.markdown("---")
     
-    tab1, tab2 = st.tabs(["Light Curve Data", "Summary Data"])
+    tab1, tab2 = st.tabs(["Light Curve Data (`exoTrain.csv`)", "Summary Data (`cumulative.csv`)"])
     
     with tab1:
         st.header("Light Curve Data Overview")
@@ -330,15 +270,15 @@ def data_exploration_page(raw_data, summary_data):
             with col1:
                 st.metric("Total Stars", f"{len(raw_data):,}")
             with col2:
-                metric_val = f"{len(raw_data[raw_data['LABEL'] == 2]):,}" if 'LABEL' in raw_data.columns else "N/A"
-                st.metric("Exoplanet Stars", metric_val)
+                val = f"{len(raw_data[raw_data['LABEL'] == 2]):,}" if 'LABEL' in raw_data.columns else "N/A"
+                st.metric("Exoplanet Stars", val)
             with col3:
-                metric_val = f"{len(raw_data[raw_data['LABEL'] == 1]):,}" if 'LABEL' in raw_data.columns else "N/A"
-                st.metric("Non-Exoplanet Stars", metric_val)
+                val = f"{len(raw_data[raw_data['LABEL'] == 1]):,}" if 'LABEL' in raw_data.columns else "N/A"
+                st.metric("Non-Exoplanet Stars", val)
             
             st.markdown("---")
-            st.subheader("Sample Light Curves")
-            n_samples = st.slider("Number of samples to display", 1, 10, 3)
+            st.subheader("Visualize Individual Light Curves")
+            n_samples = st.slider("Number of samples to display", 1, 10, 3, key='lc_slider')
             fig_light_curves = plot_light_curves(raw_data, n_samples)
             if fig_light_curves:
                 st.plotly_chart(fig_light_curves, use_container_width=True)
@@ -346,23 +286,15 @@ def data_exploration_page(raw_data, summary_data):
             st.error("Light curve data not available.")
     
     with tab2:
-        st.header("Summary Data Overview")
+        st.header("Kepler Objects of Interest (KOI) Overview")
         if summary_data is not None:
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("Total Observations", f"{len(summary_data):,}")
-            with col2:
-                if 'koi_disposition' in summary_data.columns:
-                    dispositions = summary_data['koi_disposition'].value_counts()
-                    st.metric("Confirmed Exoplanets", f"{dispositions.get('CONFIRMED', 0):,}")
-                else:
-                    st.metric("Confirmed Exoplanets", "N/A")
-
+            st.metric("Total KOI Observations", f"{len(summary_data):,}")
             st.markdown("---")
             st.subheader("Exoplanet Dispositions")
             if 'koi_disposition' in summary_data.columns:
                 fig_disposition = px.pie(
-                    summary_data, names='koi_disposition', hole=0.3,
+                    summary_data, names='koi_disposition', hole=0.4,
+                    title="Distribution of KOI Dispositions",
                     color_discrete_sequence=[COLOR_PALETTE['nebula_purple'], COLOR_PALETTE['starry_white'], '#868e96']
                 )
                 fig_disposition.update_layout(
@@ -375,11 +307,8 @@ def data_exploration_page(raw_data, summary_data):
 
 # Predict with CNN
 def predict_with_cnn(data):
-    """Make predictions with CNN model in batches"""
+    """Make predictions with the CNN model."""
     try:
-        if st.session_state.scaler_cnn is None:
-            raise ValueError("CNN scaler not loaded.")
-        
         X = data.drop(columns=['LABEL'], errors='ignore').values
         X_scaled = st.session_state.scaler_cnn.transform(X)
         X_reshaped = X_scaled.reshape(X_scaled.shape[0], X_scaled.shape[1], 1)
@@ -398,11 +327,8 @@ def predict_with_cnn(data):
 
 # Predict with XGBoost
 def predict_with_xgb(data):
-    """Make predictions with XGBoost model"""
+    """Make predictions with the XGBoost model."""
     try:
-        if any(comp is None for comp in [st.session_state.scaler_xgb, st.session_state.label_encoder, st.session_state.features_to_use]):
-            raise ValueError("XGBoost components (scaler, encoder, features) not loaded.")
-        
         missing_features = set(st.session_state.features_to_use) - set(data.columns)
         if missing_features:
             raise ValueError(f"Missing required features for XGBoost: {missing_features}")
@@ -428,16 +354,17 @@ def predict_with_xgb(data):
 
 # Predictions Page
 def predictions_page():
-    """Render the predictions page"""
-    st.title("🔮 Predictions")
+    """Render the predictions page."""
+    st.title("🔮 Model Predictions")
     st.markdown("---")
     
-    model_choice = st.selectbox("Select Model for Prediction", ["CNN", "XGBoost"])
+    st.info("Upload a CSV file with data in the same format as `exoTrain.csv` or `cumulative.csv` to make predictions.")
     
-    # Button to load/verify model existence
-    button_label = f"🔄 Verify {model_choice} Model"
+    model_choice = st.selectbox("Select Model for Prediction", ["CNN (for Light Curves)", "XGBoost (for Summary Features)"])
+    
+    button_label = f"🔄 Load/Verify {model_choice.split(' ')[0]} Model"
     if st.button(button_label):
-        if model_choice == "CNN":
+        if "CNN" in model_choice:
             load_cnn_model()
         else:
             load_xgb_model()
@@ -447,20 +374,23 @@ def predictions_page():
     if uploaded_file is not None:
         try:
             data = pd.read_csv(uploaded_file)
-            st.success(f"Successfully uploaded {uploaded_file.name} with {len(data)} records")
+            st.success(f"Successfully uploaded `{uploaded_file.name}` with {len(data):,} records.")
             
             with st.spinner("Making predictions..."):
                 results = None
-                if model_choice == "CNN":
+                model_loaded = False
+                
+                if "CNN" in model_choice:
                     if st.session_state.cnn_model:
+                        model_loaded = True
                         results = predict_with_cnn(data)
-                    else:
-                        st.error("Please verify the CNN model before making predictions.")
-                else: # XGBoost
+                elif "XGBoost" in model_choice:
                     if st.session_state.xgb_model:
+                        model_loaded = True
                         results = predict_with_xgb(data)
-                    else:
-                        st.error("Please verify the XGBoost model before making predictions.")
+
+                if not model_loaded:
+                    st.error(f"Please load the {model_choice.split(' ')[0]} model first using the button above.")
                 
                 if results is not None:
                     st.subheader("Prediction Results")
@@ -468,8 +398,7 @@ def predictions_page():
                     
                     st.subheader("Prediction Distribution")
                     fig_pie = px.pie(
-                        results, names='Prediction', title='Prediction Distribution',
-                        color='Prediction',
+                        results, names='Prediction', title='Distribution of Predictions',
                         color_discrete_map={
                             'Exoplanet': COLOR_PALETTE['nebula_purple'], 
                             'Non-Exoplanet': COLOR_PALETTE['starry_white'],
@@ -478,11 +407,7 @@ def predictions_page():
                             'FALSE POSITIVE': '#868e96'
                         }
                     )
-                    fig_pie.update_layout(
-                        paper_bgcolor=COLOR_PALETTE['dark_slate'],
-                        plot_bgcolor=COLOR_PALETTE['dark_slate'],
-                        font=dict(color=COLOR_PALETTE['starry_white'])
-                    )
+                    fig_pie.update_layout(paper_bgcolor=COLOR_PALETTE['dark_slate'], font_color=COLOR_PALETTE['starry_white'])
                     st.plotly_chart(fig_pie, use_container_width=True)
 
         except Exception as e:
@@ -505,8 +430,8 @@ def feedback_page():
 # Main application logic
 def main():
     """Main function to run the Streamlit app"""
-    initialize_session_state()
     setup_page_config()
+    initialize_session_state()
     
     st.sidebar.title("Navigation")
     page = st.sidebar.radio(
@@ -516,8 +441,7 @@ def main():
     )
     st.sidebar.markdown("---")
     st.sidebar.info(
-        "This dashboard is for educational and demonstration purposes. "
-        "Model training is disabled in this live environment."
+        "This dashboard is for educational and demonstration purposes. Pre-trained models must be available locally to make predictions."
     )
     
     # Load data only once
