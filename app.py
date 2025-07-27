@@ -9,44 +9,36 @@ from tensorflow.keras.layers import Input, Conv1D, MaxPooling1D, GlobalAveragePo
 from tensorflow.keras.regularizers import l2
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 from tensorflow.keras import backend as K
-from sklearn.model_selection import train_test_split, StratifiedKFold
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, roc_auc_score, roc_curve
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.metrics import accuracy_score, classification_report, roc_auc_score, roc_curve, confusion_matrix
 from sklearn.utils import class_weight, resample
+from sklearn.model_selection import train_test_split
 import xgboost as xgb
 from tabulate import tabulate
 from sklearn.utils.class_weight import compute_class_weight
-from sklearn.metrics import precision_score, recall_score, f1_score
 import shap
+import joblib
+import os
 
 # Set page config
 st.set_page_config(page_title="Exoplanet Detection", layout="wide")
 
 # Title
-st.title("Exoplanet Detection from Kepler Light Curves")
+st.title("Exoplanet Detection from Kepler Light Curves and Expert Features")
 
 # Sidebar for navigation
 st.sidebar.title("Navigation")
 page = st.sidebar.radio("Go to", ["Data Exploration", "Model Training", "Predictions"])
 
-# Initialize session state for storing models and metrics
+# Initialize session state
 if 'model' not in st.session_state:
     st.session_state.model = None
     st.session_state.model_type = None
-    st.session_state.scaler = None
+    st.session_state.scaler_cnn = None
+    st.session_state.scaler_xgb = None
+    st.session_state.label_encoder = None
     st.session_state.model_metrics = []
-
-# Load data function
-@st.cache_data
-def load_data():
-    try:
-        summary_data = pd.read_csv("datasets/cumulative.csv")
-        raw_train_data = pd.read_csv("datasets/exoTrain.csv")
-        raw_test_data = pd.read_csv("datasets/exoTest.csv")
-        return summary_data, raw_train_data, raw_test_data
-    except FileNotFoundError:
-        st.error("ERROR: Dataset files not found. Please ensure 'datasets/cumulative.csv', 'datasets/exoTrain.csv', and 'datasets/exoTest.csv' are available.")
-        return None, None, None
+    st.session_state.features_to_use = None
 
 # Focal Loss Function
 def focal_loss(gamma=1.0, alpha=0.75):
@@ -80,10 +72,10 @@ def bootstrap_metrics(y_true, y_pred_proba, n_bootstraps=1000):
         y_pred_proba_boot = y_pred_proba[idx]
         y_pred_boot = (y_pred_proba_boot > 0.3).astype(int)
         aucs.append(roc_auc_score(y_true_boot, y_pred_proba_boot))
-        report = classification_report(y_true_boot, y_pred_boot, output_dict=True, zero_division=0)['1']
-        recalls.append(report['recall'])
-        precisions.append(report['precision'])
-        f1s.append(report['f1-score'])
+        report = classification_report(y_true_boot, y_pred_boot, output_dict=True, zero_division=0).get('1', {})
+        recalls.append(report.get('recall', 0))
+        precisions.append(report.get('precision', 0))
+        f1s.append(report.get('f1-score', 0))
     auc_ci = np.percentile(aucs, [2.5, 97.5])
     recall_ci = np.percentile(recalls, [2.5, 97.5])
     precision_ci = np.percentile(precisions, [2.5, 97.5])
@@ -113,9 +105,20 @@ def apply_grad_cam(model, input_data, class_index=None, layer_name='conv1d_2'):
     heatmap = np.maximum(heatmap, 0)
     heatmap /= np.max(heatmap) + 1e-8
     heatmap_resized = np.interp(np.arange(3197), np.linspace(0, 3197, len(heatmap)), heatmap)
-    return heatmap_resized, class_index
+    return heatmap_resized, class_idx
 
 # Load data
+@st.cache_data
+def load_data():
+    try:
+        summary_data = pd.read_csv("datasets/cumulative.csv")
+        raw_train_data = pd.read_csv("datasets/exoTrain.csv")
+        raw_test_data = pd.read_csv("datasets/exoTest.csv")
+        return summary_data, raw_train_data, raw_test_data
+    except FileNotFoundError:
+        st.error("ERROR: Dataset files not found.")
+        return None, None, None
+
 summary_data, raw_train_data, raw_test_data = load_data()
 
 if page == "Data Exploration":
@@ -133,14 +136,13 @@ if page == "Data Exploration":
         st.subheader("First 5 Rows from Raw Training Data:")
         st.dataframe(raw_train_data.head())
         
-        # Sample light curves visualization
         st.subheader("Sample Light Curves")
         num_samples = st.slider("Number of samples to display", 1, 5, 3)
         sample_indices = np.random.choice(raw_train_data.shape[0], num_samples, replace=False)
         
         for i, idx in enumerate(sample_indices):
             label = raw_train_data.iloc[idx]['LABEL']
-            flux_values = raw_train_data.iloc[idx, 1:].values  # Skip LABEL column
+            flux_values = raw_train_data.iloc[idx, 1:].values
             fig, ax = plt.subplots(figsize=(14, 4))
             ax.plot(flux_values, label=f"Sample #{idx} | Label: {'CONFIRMED' if label == 2 else 'FALSE POSITIVE'}")
             ax.set_xlabel("Time Step")
@@ -153,225 +155,378 @@ if page == "Data Exploration":
 elif page == "Model Training":
     st.header("Model Training")
     
-    if raw_train_data is not None and raw_test_data is not None:
+    if raw_train_data is not None and raw_test_data is not None and summary_data is not None:
         st.subheader("Data Preparation")
         
-        # Preprocessing
-        st.write("Preprocessing data: Standardizing and encoding labels...")
-        X_train = raw_train_data.drop(columns=['LABEL']).values
-        y_train = raw_train_data['LABEL'].map({1: 0, 2: 1}).values  # Map 1 (FALSE) to 0, 2 (CONFIRMED) to 1
-        X_test = raw_test_data.drop(columns=['LABEL']).values
-        y_test = raw_test_data['LABEL'].map({1: 0, 2: 1}).values
+        # Load label encoder
+        try:
+            st.session_state.label_encoder = joblib.load('models/label_encoder.pkl')
+        except FileNotFoundError:
+            st.error("Label encoder not found. Please ensure 'models/label_encoder.pkl' is available.")
+            st.stop()
         
-        # Standardize features
-        st.session_state.scaler = StandardScaler()
-        X_train = st.session_state.scaler.fit_transform(X_train)
-        X_test = st.session_state.scaler.transform(X_test)
+        # Preprocessing for CNN
+        X_train_cnn = raw_train_data.drop(columns=['LABEL']).values
+        y_train_cnn = raw_train_data['LABEL'].values - 1
+        X_test_cnn = raw_test_data.drop(columns=['LABEL']).values
+        y_test_cnn = raw_test_data['LABEL'].values - 1
+        try:
+            st.session_state.scaler_cnn = joblib.load('models/scaler_cnn.pkl')
+            X_train_cnn = st.session_state.scaler_cnn.transform(X_train_cnn)
+            X_test_cnn = st.session_state.scaler_cnn.transform(X_test_cnn)
+        except FileNotFoundError:
+            st.warning("CNN scaler not found. Using new scaler (results may differ).")
+            st.session_state.scaler_cnn = StandardScaler()
+            X_train_cnn = st.session_state.scaler_cnn.fit_transform(X_train_cnn)
+            X_test_cnn = st.session_state.scaler_cnn.transform(X_test_cnn)
         
-        # Data augmentation for CNN
-        if st.checkbox("Apply data augmentation for CNN"):
-            st.write("Augmenting training data with Gaussian noise and random shifts...")
-            X_train_aug, y_train_aug = augment_data(X_train, y_train, sigma=0.04, max_shift=200)
-            X_train = np.concatenate([X_train, X_train_aug])
-            y_train = np.concatenate([y_train, y_train_aug])
+        # Preprocessing for XGBoost
+        numeric_columns = summary_data.select_dtypes(include=[np.number]).columns
+        exclude_columns = ['kepid', 'koi_disposition', 'label_encoded']
+        st.session_state.features_to_use = [col for col in numeric_columns if col not in exclude_columns]
+        if not st.session_state.features_to_use:
+            st.error("No numeric features found in summary_data.")
+            st.stop()
         
-        st.write(f"Training set shape: {X_train.shape}, Test set shape: {X_test.shape}")
+        if 'label_encoded' not in summary_data.columns:
+            summary_data['label_encoded'] = st.session_state.label_encoder.fit_transform(summary_data['koi_disposition'])
+        X_xgb = summary_data[st.session_state.features_to_use].fillna(summary_data[st.session_state.features_to_use].mean(numeric_only=True))
+        y_xgb = summary_data['label_encoded']
+        X_train_xgb, X_test_xgb, y_train_xgb, y_test_xgb = train_test_split(
+            X_xgb, y_xgb, test_size=0.3, stratify=y_xgb, random_state=42
+        )
+        try:
+            st.session_state.scaler_xgb = joblib.load('models/scaler_xgb.pkl')
+            X_train_xgb = st.session_state.scaler_xgb.transform(X_train_xgb)
+            X_test_xgb = st.session_state.scaler_xgb.transform(X_test_xgb)
+        except FileNotFoundError:
+            st.warning("XGBoost scaler not found. Using new scaler (results may differ).")
+            st.session_state.scaler_xgb = StandardScaler()
+            X_train_xgb = st.session_state.scaler_xgb.fit_transform(X_train_xgb)
+            X_test_xgb = st.session_state.scaler_xgb.transform(X_test_xgb)
+        
+        st.write(f"CNN Training set shape: {X_train_cnn.shape}, Test set shape: {X_test_cnn.shape}")
+        st.write(f"XGBoost Training set shape: {X_train_xgb.shape}, Test set shape: {X_test_xgb.shape}")
         
         st.subheader("Model Selection")
         model_type = st.selectbox("Select model type", ["CNN", "XGBoost"])
         
-        @st.cache_resource
-        def train_cnn_model(X_train, y_train, X_test, y_test):
-            X_train_cnn = X_train.reshape(-1, 3197, 1)
-            X_test_cnn = X_test.reshape(-1, 3197, 1)
-            input_shape = (3197, 1)
-            inputs = Input(shape=input_shape)
-            x = Conv1D(32, 3, activation='relu', padding='same', kernel_regularizer=l2(0.01))(inputs)
-            x = MaxPooling1D(2)(x)
-            x = BatchNormalization()(x)
-            x = Conv1D(64, 3, activation='relu', padding='same', kernel_regularizer=l2(0.01))(x)
-            x = MaxPooling1D(2)(x)
-            x = BatchNormalization()(x)
-            x = Conv1D(128, 3, activation='relu', padding='same', kernel_regularizer=l2(0.01))(x)
-            x = GlobalAveragePooling1D()(x)
-            x = Dropout(0.5)(x)
-            outputs = Dense(1, activation='sigmoid')(x)
-            model = Model(inputs, outputs)
-            model.compile(optimizer='adam', loss=focal_loss(gamma=1.0, alpha=0.75), metrics=['accuracy'])
-            early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
-            reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, min_lr=1e-6)
-            class_weights = compute_class_weight('balanced', classes=np.unique(y_train), y=y_train)
-            class_weight_dict = dict(enumerate(class_weights))
-            history = model.fit(
-                X_train_cnn, y_train,
-                validation_data=(X_test_cnn, y_test),
-                epochs=20, batch_size=32,
-                class_weight=class_weight_dict,
-                callbacks=[early_stopping, reduce_lr],
-                verbose=0
-            )
-            return model, history, X_test_cnn
-
-        @st.cache_resource
-        def train_xgb_model(X_train, y_train):
-            xgb_model = xgb.XGBClassifier(
-                objective='binary:logistic',
-                eval_metric='logloss',
-                use_label_encoder=False
-            )
-            xgb_model.fit(X_train, y_train)
-            return xgb_model
-
         if model_type == "CNN":
             st.write("### CNN Model Architecture")
             st.code("""
-            input_shape = (3197, 1)
-            inputs = Input(shape=input_shape)
-            x = Conv1D(32, 3, activation='relu', padding='same', kernel_regularizer=l2(0.01))(inputs)
-            x = MaxPooling1D(2)(x)
+            inputs = Input(shape=(3197, 1), name='input_layer')
+            x = Conv1D(16, kernel_size=7, activation='relu', kernel_regularizer=l2(0.01))(inputs)
             x = BatchNormalization()(x)
-            x = Conv1D(64, 3, activation='relu', padding='same', kernel_regularizer=l2(0.01))(x)
-            x = MaxPooling1D(2)(x)
+            x = MaxPooling1D(pool_size=4)(x)
+            x = Conv1D(32, kernel_size=7, activation='relu', kernel_regularizer=l2(0.01))(x)
             x = BatchNormalization()(x)
-            x = Conv1D(128, 3, activation='relu', padding='same', kernel_regularizer=l2(0.01))(x)
+            x = MaxPooling1D(pool_size=4)(x)
+            x = Conv1D(64, kernel_size=7, activation='relu', kernel_regularizer=l2(0.01))(x)
+            x = BatchNormalization()(x)
+            x = MaxPooling1D(pool_size=4)(x)
             x = GlobalAveragePooling1D()(x)
-            x = Dropout(0.5)(x)
+            x = Dense(64, activation='relu', kernel_regularizer=l2(0.01))(x)
+            x = Dropout(0.3)(x)
             outputs = Dense(1, activation='sigmoid')(x)
             model = Model(inputs, outputs)
             """, language='python')
             
-            if st.button("Train CNN Model"):
-                with st.spinner("Training CNN model..."):
-                    model, history, X_test_cnn = train_cnn_model(X_train, y_train, X_test, y_test)
-                    st.session_state.model = model
-                    st.session_state.model_type = "CNN"
-                    
-                    # Evaluate model
-                    y_pred_proba = model.predict(X_test_cnn, verbose=0)
-                    y_pred = (y_pred_proba > 0.3).astype(int)
-                    accuracy = accuracy_score(y_test, y_pred)
-                    auc = roc_auc_score(y_test, y_pred_proba)
-                    report = classification_report(y_test, y_pred, output_dict=True, zero_division=0)
-                    precision = report['1']['precision']
-                    recall = report['1']['recall']
-                    f1 = report['1']['f1-score']
-                    auc_mean, auc_ci, recall_mean, recall_ci, precision_mean, precision_ci, f1_mean, f1_ci = bootstrap_metrics(y_test, y_pred_proba)
-                    
-                    # Store metrics
-                    st.session_state.model_metrics.append(["CNN", accuracy * 100, auc, precision, recall, f1])
-                    
-                    # Display metrics
-                    st.success("CNN Training Complete!")
-                    st.write("### CNN Performance Metrics")
-                    st.write(f"Accuracy: {accuracy * 100:.2f}%")
-                    st.write(f"AUC: {auc_mean:.4f} (95% CI: {auc_ci[0]:.4f} - {auc_ci[1]:.4f})")
-                    st.write(f"CONFIRMED Precision: {precision_mean:.4f} (95% CI: {precision_ci[0]:.4f} - {precision_ci[1]:.4f})")
-                    st.write(f"CONFIRMED Recall: {recall_mean:.4f} (95% CI: {recall_ci[0]:.4f} - {recall_ci[1]:.4f})")
-                    st.write(f"CONFIRMED F1-Score: {f1_mean:.4f} (95% CI: {f1_ci[0]:.4f} - {f1_ci[1]:.4f})")
-                    
-                    # Plot training history
-                    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
-                    ax1.plot(history.history['loss'], label='Train Loss')
-                    ax1.plot(history.history['val_loss'], label='Validation Loss')
-                    ax1.set_title('Model Loss')
-                    ax1.set_xlabel('Epoch')
-                    ax1.set_ylabel('Loss')
-                    ax1.legend()
-                    ax2.plot(history.history['accuracy'], label='Train Accuracy')
-                    ax2.plot(history.history['val_accuracy'], label='Validation Accuracy')
-                    ax2.set_title('Model Accuracy')
-                    ax2.set_xlabel('Epoch')
-                    ax2.set_ylabel('Accuracy')
-                    ax2.legend()
-                    plt.tight_layout()
-                    st.pyplot(fig)
-                    
-                    # ROC Curve
-                    fpr, tpr, _ = roc_curve(y_test, y_pred_proba)
-                    fig, ax = plt.subplots(figsize=(6, 4))
-                    ax.plot(fpr, tpr, label=f'ROC Curve (AUC = {auc:.4f})')
-                    ax.plot([0, 1], [0, 1], linestyle='--', color='gray')
-                    ax.set_xlabel('False Positive Rate')
-                    ax.set_ylabel('True Positive Rate')
-                    ax.set_title('ROC Curve')
-                    ax.legend()
-                    st.pyplot(fig)
-                    
-                    # Grad-CAM Visualization
-                    st.write("### Grad-CAM Visualization")
-                    sample_idx = st.selectbox("Select sample index for Grad-CAM", range(len(X_test)))
-                    heatmap, class_idx = apply_grad_cam(model, X_test_cnn[sample_idx], layer_name='conv1d_2')
-                    fig, ax = plt.subplots(figsize=(14, 4))
-                    ax.plot(X_test[sample_idx], label='Light Curve')
-                    ax.plot(heatmap * np.max(X_test[sample_idx]), label='Grad-CAM Heatmap', alpha=0.5)
-                    ax.set_title(f"Grad-CAM for Sample #{sample_idx} (Predicted: {'CONFIRMED' if class_idx == 1 else 'FALSE POSITIVE'})")
-                    ax.set_xlabel("Time Step")
-                    ax.set_ylabel("Flux / Heatmap")
-                    ax.legend()
-                    st.pyplot(fig)
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Train CNN Model (Lightweight)"):
+                    with st.spinner("Training lightweight CNN model..."):
+                        try:
+                            subset_idx = np.random.choice(len(X_train_cnn), size=int(0.1 * len(X_train_cnn)), replace=False)
+                            X_train_subset = X_train_cnn[subset_idx]
+                            y_train_subset = y_train_cnn[subset_idx]
+                            X_train_subset = X_train_subset.reshape(-1, 3197, 1)
+                            X_test_cnn_reshaped = X_test_cnn.reshape(-1, 3197, 1)
+                            
+                            confirmed_indices = np.where(y_train_subset == 1)[0]
+                            X_confirmed = X_train_subset[confirmed_indices]
+                            y_confirmed = y_train_subset[confirmed_indices]
+                            oversample_factor = 15
+                            X_train_oversampled = np.vstack([X_train_subset] + [X_confirmed] * oversample_factor)
+                            y_train_oversampled = np.hstack([y_train_subset] + [y_confirmed] * oversample_factor)
+                            
+                            if st.checkbox("Apply data augmentation (Warning: Increases memory usage)", key="cnn_aug"):
+                                X_train_oversampled, y_train_oversampled = augment_data(X_train_oversampled, y_train_oversampled, sigma=0.04, max_shift=200)
+                            
+                            class_weights = compute_class_weight('balanced', classes=np.unique(y_train_oversampled), y=y_train_oversampled)
+                            class_weight_dict = {i: class_weights[i] for i in range(len(class_weights))}
+                            
+                            inputs = Input(shape=(3197, 1), name='input_layer')
+                            x = Conv1D(16, kernel_size=7, activation='relu', kernel_regularizer=l2(0.01))(inputs)
+                            x = BatchNormalization()(x)
+                            x = MaxPooling1D(pool_size=4)(x)
+                            x = Conv1D(32, kernel_size=7, activation='relu', kernel_regularizer=l2(0.01))(x)
+                            x = BatchNormalization()(x)
+                            x = MaxPooling1D(pool_size=4)(x)
+                            x = Conv1D(64, kernel_size=7, activation='relu', kernel_regularizer=l2(0.01))(x)
+                            x = BatchNormalization()(x)
+                            x = MaxPooling1D(pool_size=4)(x)
+                            x = GlobalAveragePooling1D()(x)
+                            x = Dense(64, activation='relu', kernel_regularizer=l2(0.01))(x)
+                            x = Dropout(0.3)(x)
+                            outputs = Dense(1, activation='sigmoid')(x)
+                            model = Model(inputs, outputs)
+                            
+                            model.compile(optimizer='adam', loss=focal_loss(gamma=1.0, alpha=0.75), metrics=['accuracy'])
+                            early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
+                            lr_scheduler = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=3, min_lr=1e-6)
+                            history = model.fit(
+                                X_train_oversampled, y_train_oversampled,
+                                validation_data=(X_test_cnn_reshaped, y_test_cnn),
+                                epochs=10, batch_size=16,
+                                callbacks=[early_stopping, lr_scheduler],
+                                class_weight=class_weight_dict,
+                                verbose=0
+                            )
+                            st.session_state.model = model
+                            st.session_state.model_type = "CNN"
+                            st.session_state.history = history
+                            
+                            y_pred_proba = model.predict(X_test_cnn_reshaped, verbose=0).flatten()
+                            y_pred = (y_pred_proba > 0.3).astype(int)
+                            accuracy = accuracy_score(y_test_cnn, y_pred)
+                            auc = roc_auc_score(y_test_cnn, y_pred_proba)
+                            report = classification_report(y_test_cnn, y_pred, output_dict=True, zero_division=0)
+                            precision = report.get('1', {}).get('precision', 0)
+                            recall = report.get('1', {}).get('recall', 0)
+                            f1 = report.get('1', {}).get('f1-score', 0)
+                            auc_mean, auc_ci, recall_mean, recall_ci, precision_mean, precision_ci, f1_mean, f1_ci = bootstrap_metrics(y_test_cnn, y_pred_proba)
+                            
+                            st.session_state.model_metrics.append(["CNN", accuracy * 100, auc, precision, recall, f1])
+                            
+                            st.success("CNN Training Complete!")
+                            st.write("### CNN Performance Metrics")
+                            st.write(f"Accuracy: {accuracy * 100:.2f}%")
+                            st.write(f"AUC: {auc_mean:.4f} (95% CI: {auc_ci[0]:.4f} - {auc_ci[1]:.4f})")
+                            st.write(f"CONFIRMED Precision: {precision_mean:.4f} (95% CI: {precision_ci[0]:.4f} - {precision_ci[1]:.4f})")
+                            st.write(f"CONFIRMED Recall: {recall_mean:.4f} (95% CI: {recall_ci[0]:.4f} - {recall_ci[1]:.4f})")
+                            st.write(f"CONFIRMED F1-Score: {f1_mean:.4f} (95% CI: {f1_ci[0]:.4f} - {f1_ci[1]:.4f})")
+                            
+                            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+                            ax1.plot(history.history['loss'], label='Train Loss')
+                            ax1.plot(history.history['val_loss'], label='Validation Loss')
+                            ax1.set_title('Model Loss')
+                            ax1.set_xlabel('Epoch')
+                            ax1.set_ylabel('Loss')
+                            ax1.legend()
+                            ax2.plot(history.history['accuracy'], label='Train Accuracy')
+                            ax2.plot(history.history['val_accuracy'], label='Validation Accuracy')
+                            ax2.set_title('Model Accuracy')
+                            ax2.set_xlabel('Epoch')
+                            ax2.set_ylabel('Accuracy')
+                            ax2.legend()
+                            plt.tight_layout()
+                            st.pyplot(fig)
+                            
+                            fpr, tpr, _ = roc_curve(y_test_cnn, y_pred_proba)
+                            fig, ax = plt.subplots(figsize=(6, 4))
+                            ax.plot(fpr, tpr, label=f'ROC Curve (AUC = {auc:.4f})')
+                            ax.plot([0, 1], [0, 1], linestyle='--', color='gray')
+                            ax.set_xlabel('False Positive Rate')
+                            ax.set_ylabel('True Positive Rate')
+                            ax.set_title('ROC Curve')
+                            ax.legend()
+                            st.pyplot(fig)
+                            
+                            cm = confusion_matrix(y_test_cnn, y_pred)
+                            fig, ax = plt.subplots(figsize=(6, 4))
+                            sns.heatmap(cm, annot=True, fmt='d', cmap='Greens', xticklabels=['FALSE', 'CONFIRMED'], yticklabels=['FALSE', 'CONFIRMED'])
+                            ax.set_title('CNN Confusion Matrix')
+                            ax.set_xlabel('Predicted')
+                            ax.set_ylabel('Actual')
+                            st.pyplot(fig)
+                            
+                            st.write("### Grad-CAM Visualization")
+                            sample_idx = st.selectbox("Select sample index for Grad-CAM", range(len(X_test_cnn)), key="cnn_gradcam")
+                            heatmap, class_idx = apply_grad_cam(model, X_test_cnn_reshaped[sample_idx], layer_name='conv1d_2')
+                            fig, ax = plt.subplots(figsize=(14, 4))
+                            ax.plot(X_test_cnn[sample_idx], label='Light Curve')
+                            ax.plot(heatmap * np.max(X_test_cnn[sample_idx]), label='Grad-CAM Heatmap', alpha=0.5)
+                            ax.set_title(f"Grad-CAM for Sample #{sample_idx} (Predicted: {'CONFIRMED' if class_idx == 1 else 'FALSE POSITIVE'})")
+                            ax.set_xlabel("Time Step")
+                            ax.set_ylabel("Flux / Heatmap")
+                            ax.legend()
+                            st.pyplot(fig)
+                        except Exception as e:
+                            st.error(f"Error during training: {e}")
+            
+            with col2:
+                if st.button("Load Pre-Trained CNN Model"):
+                    with st.spinner("Loading pre-trained CNN model..."):
+                        try:
+                            model = tf.keras.models.load_model('models/cnn_exoplanet_model.keras', custom_objects={'focal_loss_fixed': focal_loss(gamma=1.0, alpha=0.75)})
+                            st.session_state.model = model
+                            st.session_state.model_type = "CNN"
+                            X_test_cnn_reshaped = X_test_cnn.reshape(-1, 3197, 1)
+                            y_pred_proba = model.predict(X_test_cnn_reshaped, verbose=0).flatten()
+                            y_pred = (y_pred_proba > 0.3).astype(int)
+                            accuracy = accuracy_score(y_test_cnn, y_pred)
+                            auc = roc_auc_score(y_test_cnn, y_pred_proba)
+                            report = classification_report(y_test_cnn, y_pred, output_dict=True, zero_division=0)
+                            precision = report.get('1', {}).get('precision', 0)
+                            recall = report.get('1', {}).get('recall', 0)
+                            f1 = report.get('1', {}).get('f1-score', 0)
+                            auc_mean, auc_ci, recall_mean, recall_ci, precision_mean, precision_ci, f1_mean, f1_ci = bootstrap_metrics(y_test_cnn, y_pred_proba)
+                            st.session_state.model_metrics.append(["CNN", accuracy * 100, auc, precision, recall, f1])
+                            st.success("CNN Model Loaded Successfully!")
+                            st.write("### CNN Performance Metrics")
+                            st.write(f"Accuracy: {accuracy * 100:.2f}%")
+                            st.write(f"AUC: {auc_mean:.4f} (95% CI: {auc_ci[0]:.4f} - {auc_ci[1]:.4f})")
+                            st.write(f"CONFIRMED Precision: {precision_mean:.4f} (95% CI: {precision_ci[0]:.4f} - {precision_ci[1]:.4f})")
+                            st.write(f"CONFIRMED Recall: {recall_mean:.4f} (95% CI: {recall_ci[0]:.4f} - {recall_ci[1]:.4f})")
+                            st.write(f"CONFIRMED F1-Score: {f1_mean:.4f} (95% CI: {f1_ci[0]:.4f} - {f1_ci[1]:.4f})")
+                            fpr, tpr, _ = roc_curve(y_test_cnn, y_pred_proba)
+                            fig, ax = plt.subplots(figsize=(6, 4))
+                            ax.plot(fpr, tpr, label=f'ROC Curve (AUC = {auc:.4f})')
+                            ax.plot([0, 1], [0, 1], linestyle='--', color='gray')
+                            ax.set_xlabel('False Positive Rate')
+                            ax.set_ylabel('True Positive Rate')
+                            ax.set_title('ROC Curve')
+                            ax.legend()
+                            st.pyplot(fig)
+                            cm = confusion_matrix(y_test_cnn, y_pred)
+                            fig, ax = plt.subplots(figsize=(6, 4))
+                            sns.heatmap(cm, annot=True, fmt='d', cmap='Greens', xticklabels=['FALSE', 'CONFIRMED'], yticklabels=['FALSE', 'CONFIRMED'])
+                            ax.set_title('CNN Confusion Matrix')
+                            ax.set_xlabel('Predicted')
+                            ax.set_ylabel('Actual')
+                            st.pyplot(fig)
+                            st.write("### Grad-CAM Visualization")
+                            sample_idx = st.selectbox("Select sample index for Grad-CAM", range(len(X_test_cnn)), key="cnn_gradcam_pretrained")
+                            heatmap, class_idx = apply_grad_cam(model, X_test_cnn_reshaped[sample_idx], layer_name='conv1d_2')
+                            fig, ax = plt.subplots(figsize=(14, 4))
+                            ax.plot(X_test_cnn[sample_idx], label='Light Curve')
+                            ax.plot(heatmap * np.max(X_test_cnn[sample_idx]), label='Grad-CAM Heatmap', alpha=0.5)
+                            ax.set_title(f"Grad-CAM for Sample #{sample_idx} (Predicted: {'CONFIRMED' if class_idx == 1 else 'FALSE POSITIVE'})")
+                            ax.set_xlabel("Time Step")
+                            ax.set_ylabel("Flux / Heatmap")
+                            ax.legend()
+                            st.pyplot(fig)
+                        except Exception as e:
+                            st.error(f"Error loading model: {e}")
         
         elif model_type == "XGBoost":
-            st.write("### XGBoost Model Training")
-            if st.button("Train XGBoost Model"):
-                with st.spinner("Training XGBoost model..."):
-                    xgb_model = train_xgb_model(X_train, y_train)
-                    st.session_state.model = xgb_model
-                    st.session_state.model_type = "XGBoost"
-                    
-                    # Evaluate model
-                    y_pred = xgb_model.predict(X_test)
-                    y_pred_proba = xgb_model.predict_proba(X_test)[:, 1]
-                    accuracy = accuracy_score(y_test, y_pred)
-                    auc = roc_auc_score(y_test, y_pred_proba)
-                    report = classification_report(y_test, y_pred, output_dict=True, zero_division=0)
-                    precision = report['1']['precision']
-                    recall = report['1']['recall']
-                    f1 = report['1']['f1-score']
-                    auc_mean, auc_ci, recall_mean, recall_ci, precision_mean, precision_ci, f1_mean, f1_ci = bootstrap_metrics(y_test, y_pred_proba)
-                    
-                    # Store metrics
-                    st.session_state.model_metrics.append(["XGBoost", accuracy * 100, auc, precision, recall, f1])
-                    
-                    # Display metrics
-                    st.success("XGBoost Training Complete!")
-                    st.write("### XGBoost Performance Metrics")
-                    st.write(f"Accuracy: {accuracy * 100:.2f}%")
-                    st.write(f"AUC: {auc_mean:.4f} (95% CI: {auc_ci[0]:.4f} - {auc_ci[1]:.4f})")
-                    st.write(f"CONFIRMED Precision: {precision_mean:.4f} (95% CI: {precision_ci[0]:.4f} - {precision_ci[1]:.4f})")
-                    st.write(f"CONFIRMED Recall: {recall_mean:.4f} (95% CI: {recall_ci[0]:.4f} - {recall_ci[1]:.4f})")
-                    st.write(f"CONFIRMED F1-Score: {f1_mean:.4f} (95% CI: {f1_ci[0]:.4f} - {f1_ci[1]:.4f})")
-                    
-                    # SHAP Analysis
-                    st.write("### SHAP Feature Importance")
-                    explainer = shap.Explainer(xgb_model)
-                    shap_values = explainer(X_test)
-                    
-                    # SHAP summary plot (bar)
-                    fig, ax = plt.subplots()
-                    shap.summary_plot(shap_values, X_test, feature_names=raw_test_data.columns[1:], plot_type='bar', show=False)
-                    plt.title("SHAP Feature Importance - Bar Plot")
-                    plt.tight_layout()
-                    st.pyplot(fig)
-                    
-                    # SHAP summary plot (dot)
-                    fig, ax = plt.subplots()
-                    shap.summary_plot(shap_values, X_test, feature_names=raw_test_data.columns[1:], show=False)
-                    plt.title("SHAP Feature Importance - Dot Plot")
-                    plt.tight_layout()
-                    st.pyplot(fig)
-                    
-                    # ROC Curve
-                    fpr, tpr, _ = roc_curve(y_test, y_pred_proba)
-                    fig, ax = plt.subplots(figsize=(6, 4))
-                    ax.plot(fpr, tpr, label=f'ROC Curve (AUC = {auc:.4f})')
-                    ax.plot([0, 1], [0, 1], linestyle='--', color='gray')
-                    ax.set_xlabel('False Positive Rate')
-                    ax.set_ylabel('True Positive Rate')
-                    ax.set_title('ROC Curve')
-                    ax.legend()
-                    st.pyplot(fig)
+            st.write("### XGBoost Model")
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Train XGBoost Model"):
+                    with st.spinner("Training XGBoost model..."):
+                        try:
+                            xgb_model = xgb.XGBClassifier(
+                                objective='binary:logistic', eval_metric='logloss', use_label_encoder=False, random_state=42
+                            )
+                            xgb_model.fit(X_train_xgb, y_train_xgb)
+                            st.session_state.model = xgb_model
+                            st.session_state.model_type = "XGBoost"
+                            y_pred = xgb_model.predict(X_test_xgb)
+                            y_pred_proba = xgb_model.predict_proba(X_test_xgb)[:, 1]
+                            accuracy = accuracy_score(y_test_xgb, y_pred)
+                            auc = roc_auc_score(y_test_xgb, y_pred_proba)
+                            report = classification_report(y_test_xgb, y_pred, output_dict=True, zero_division=0)
+                            precision = report.get('1', {}).get('precision', 0)
+                            recall = report.get('1', {}).get('recall', 0)
+                            f1 = report.get('1', {}).get('f1-score', 0)
+                            auc_mean, auc_ci, recall_mean, recall_ci, precision_mean, precision_ci, f1_mean, f1_ci = bootstrap_metrics(y_test_xgb, y_pred_proba)
+                            st.session_state.model_metrics.append(["XGBoost", accuracy * 100, auc, precision, recall, f1])
+                            st.success("XGBoost Training Complete!")
+                            st.write("### XGBoost Performance Metrics")
+                            st.write(f"Accuracy: {accuracy * 100:.2f}%")
+                            st.write(f"AUC: {auc_mean:.4f} (95% CI: {auc_ci[0]:.4f} - {auc_ci[1]:.4f})")
+                            st.write(f"CONFIRMED Precision: {precision_mean:.4f} (95% CI: {precision_ci[0]:.4f} - {precision_ci[1]:.4f})")
+                            st.write(f"CONFIRMED Recall: {recall_mean:.4f} (95% CI: {recall_ci[0]:.4f} - {recall_ci[1]:.4f})")
+                            st.write(f"CONFIRMED F1-Score: {f1_mean:.4f} (95% CI: {f1_ci[0]:.4f} - {f1_ci[1]:.4f})")
+                            cm = confusion_matrix(y_test_xgb, y_pred)
+                            fig, ax = plt.subplots(figsize=(6, 4))
+                            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=st.session_state.label_encoder.classes_, yticklabels=st.session_state.label_encoder.classes_)
+                            ax.set_title('XGBoost Confusion Matrix')
+                            ax.set_xlabel('Predicted')
+                            ax.set_ylabel('Actual')
+                            st.pyplot(fig)
+                            st.write("### SHAP Feature Importance")
+                            explainer = shap.Explainer(xgb_model)
+                            shap_values = explainer(X_test_xgb)
+                            fig, ax = plt.subplots()
+                            shap.summary_plot(shap_values, X_test_xgb, feature_names=st.session_state.features_to_use, plot_type='bar', show=False)
+                            plt.title("SHAP Feature Importance - Bar Plot")
+                            plt.tight_layout()
+                            st.pyplot(fig)
+                            fig, ax = plt.subplots()
+                            shap.summary_plot(shap_values, X_test_xgb, feature_names=st.session_state.features_to_use, show=False)
+                            plt.title("SHAP Feature Importance - Dot Plot")
+                            plt.tight_layout()
+                            st.pyplot(fig)
+                            fpr, tpr, _ = roc_curve(y_test_xgb, y_pred_proba)
+                            fig, ax = plt.subplots(figsize=(6, 4))
+                            ax.plot(fpr, tpr, label=f'ROC Curve (AUC = {auc:.4f})')
+                            ax.plot([0, 1], [0, 1], linestyle='--', color='gray')
+                            ax.set_xlabel('False Positive Rate')
+                            ax.set_ylabel('True Positive Rate')
+                            ax.set_title('ROC Curve')
+                            ax.legend()
+                            st.pyplot(fig)
+                        except Exception as e:
+                            st.error(f"Error during training: {e}")
+            
+            with col2:
+                if st.button("Load Pre-Trained XGBoost Model"):
+                    with st.spinner("Loading pre-trained XGBoost model..."):
+                        try:
+                            xgb_model = joblib.load('models/xgb_model.pkl')
+                            st.session_state.model = xgb_model
+                            st.session_state.model_type = "XGBoost"
+                            y_pred = xgb_model.predict(X_test_xgb)
+                            y_pred_proba = xgb_model.predict_proba(X_test_xgb)[:, 1]
+                            accuracy = accuracy_score(y_test_xgb, y_pred)
+                            auc = roc_auc_score(y_test_xgb, y_pred_proba)
+                            report = classification_report(y_test_xgb, y_pred, output_dict=True, zero_division=0)
+                            precision = report.get('1', {}).get('precision', 0)
+                            recall = report.get('1', {}).get('recall', 0)
+                            f1 = report.get('1', {}).get('f1-score', 0)
+                            auc_mean, auc_ci, recall_mean, recall_ci, precision_mean, precision_ci, f1_mean, f1_ci = bootstrap_metrics(y_test_xgb, y_pred_proba)
+                            st.session_state.model_metrics.append(["XGBoost", accuracy * 100, auc, precision, recall, f1])
+                            st.success("XGBoost Model Loaded Successfully!")
+                            st.write("### XGBoost Performance Metrics")
+                            st.write(f"Accuracy: {accuracy * 100:.2f}%")
+                            st.write(f"AUC: {auc_mean:.4f} (95% CI: {auc_ci[0]:.4f} - {auc_ci[1]:.4f})")
+                            st.write(f"CONFIRMED Precision: {precision_mean:.4f} (95% CI: {precision_ci[0]:.4f} - {precision_ci[1]:.4f})")
+                            st.write(f"CONFIRMED Recall: {recall_mean:.4f} (95% CI: {recall_ci[0]:.4f} - {recall_ci[1]:.4f})")
+                            st.write(f"CONFIRMED F1-Score: {f1_mean:.4f} (95% CI: {f1_ci[0]:.4f} - {f1_ci[1]:.4f})")
+                            cm = confusion_matrix(y_test_xgb, y_pred)
+                            fig, ax = plt.subplots(figsize=(6, 4))
+                            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=st.session_state.label_encoder.classes_, yticklabels=st.session_state.label_encoder.classes_)
+                            ax.set_title('XGBoost Confusion Matrix')
+                            ax.set_xlabel('Predicted')
+                            ax.set_ylabel('Actual')
+                            st.pyplot(fig)
+                            st.write("### SHAP Feature Importance")
+                            explainer = shap.Explainer(xgb_model)
+                            shap_values = explainer(X_test_xgb)
+                            fig, ax = plt.subplots()
+                            shap.summary_plot(shap_values, X_test_xgb, feature_names=st.session_state.features_to_use, plot_type='bar', show=False)
+                            plt.title("SHAP Feature Importance - Bar Plot")
+                            plt.tight_layout()
+                            st.pyplot(fig)
+                            fig, ax = plt.subplots()
+                            shap.summary_plot(shap_values, X_test_xgb, feature_names=st.session_state.features_to_use, show=False)
+                            plt.title("SHAP Feature Importance - Dot Plot")
+                            plt.tight_layout()
+                            st.pyplot(fig)
+                            fpr, tpr, _ = roc_curve(y_test_xgb, y_pred_proba)
+                            fig, ax = plt.subplots(figsize=(6, 4))
+                            ax.plot(fpr, tpr, label=f'ROC Curve (AUC = {auc:.4f})')
+                            ax.plot([0, 1], [0, 1], linestyle='--', color='gray')
+                            ax.set_xlabel('False Positive Rate')
+                            ax.set_ylabel('True Positive Rate')
+                            ax.set_title('ROC Curve')
+                            ax.legend()
+                            st.pyplot(fig)
+                        except Exception as e:
+                            st.error(f"Error loading model: {e}")
         
-        # Display model comparison table
         if st.session_state.model_metrics:
             st.write("### Model Comparison")
             headers = ["Model", "Accuracy (%)", "AUC", "CONFIRMED Precision", "CONFIRMED Recall", "CONFIRMED F1"]
@@ -381,55 +536,61 @@ elif page == "Predictions":
     st.header("Make Predictions")
     
     if st.session_state.model is None:
-        st.warning("No model trained yet. Please train a model in the 'Model Training' section first.")
+        st.warning("No model trained or loaded. Please go to 'Model Training' to train or load a model.")
     else:
-        st.write(f"Using trained {st.session_state.model_type} model for predictions.")
-        uploaded_file = st.file_uploader("Upload a light curve file (CSV with 3197 flux values)", type=["csv"])
+        st.write(f"Using {st.session_state.model_type} model for predictions.")
+        input_type = st.radio("Select input type", ["Raw Light Curve (CNN)", "Expert Features (XGBoost)"])
         
-        if uploaded_file is not None:
-            try:
-                data = pd.read_csv(uploaded_file)
-                st.write("Uploaded data preview:")
-                st.dataframe(data.head())
-                
-                if data.shape[1] == 3197:
-                    X_new = st.session_state.scaler.transform(data.values)
-                    if st.session_state.model_type == "CNN":
+        if input_type == "Raw Light Curve (CNN)":
+            uploaded_file = st.file_uploader("Upload a light curve CSV (3197 flux values)", type=["csv"])
+            if uploaded_file is not None:
+                try:
+                    data = pd.read_csv(uploaded_file)
+                    if data.shape[1] == 3197:
+                        X_new = st.session_state.scaler_cnn.transform(data.values)
                         X_new = X_new.reshape(-1, 3197, 1)
                         pred_proba = st.session_state.model.predict(X_new, verbose=0)[0][0]
-                    else:
-                        pred_proba = st.session_state.model.predict_proba(X_new)[:, 1][0]
-                    prediction = 1 if pred_proba > 0.3 else 0
-                    
-                    if prediction == 1:
-                        st.success(f"Prediction: EXOPLANET DETECTED (confidence: {pred_proba:.2%})")
-                    else:
-                        st.error(f"Prediction: NO EXOPLANET DETECTED (confidence: {1 - pred_proba:.2%})")
-                    
-                    # Visualize uploaded light curve
-                    st.write("### Uploaded Light Curve")
-                    fig, ax = plt.subplots(figsize=(14, 4))
-                    ax.plot(data.values[0], label='Uploaded Light Curve')
-                    ax.set_xlabel("Time Step")
-                    ax.set_ylabel("Flux (Brightness)")
-                    ax.set_title("Uploaded Light Curve")
-                    ax.legend()
-                    ax.grid(True)
-                    st.pyplot(fig)
-                    
-                    # Grad-CAM for CNN
-                    if st.session_state.model_type == "CNN":
-                        st.write("### Grad-CAM Visualization")
+                        prediction = 1 if pred_proba > 0.3 else 0
+                        label = 'CONFIRMED' if prediction == 1 else 'FALSE POSITIVE'
+                        st.success(f"Prediction: {label} (confidence: {pred_proba:.2%})")
+                        
+                        fig, ax = plt.subplots(figsize=(14, 4))
+                        ax.plot(data.values[0], label='Uploaded Light Curve')
+                        ax.set_xlabel("Time Step")
+                        ax.set_ylabel("Flux (Brightness)")
+                        ax.set_title("Uploaded Light Curve")
+                        ax.legend()
+                        ax.grid(True)
+                        st.pyplot(fig)
+                        
                         heatmap, class_idx = apply_grad_cam(st.session_state.model, X_new[0], layer_name='conv1d_2')
                         fig, ax = plt.subplots(figsize=(14, 4))
                         ax.plot(X_new[0, :, 0], label='Light Curve')
                         ax.plot(heatmap * np.max(X_new[0, :, 0]), label='Grad-CAM Heatmap', alpha=0.5)
-                        ax.set_title(f"Grad-CAM for Uploaded Light Curve (Predicted: {'CONFIRMED' if class_idx == 1 else 'FALSE POSITIVE'})")
+                        ax.set_title(f"Grad-CAM (Predicted: {'CONFIRMED' if class_idx == 1 else 'FALSE POSITIVE'})")
                         ax.set_xlabel("Time Step")
                         ax.set_ylabel("Flux / Heatmap")
                         ax.legend()
                         st.pyplot(fig)
-                else:
-                    st.error("Uploaded file must contain exactly 3197 flux values.")
-            except Exception as e:
-                st.error(f"Error processing file: {e}")
+                    else:
+                        st.error("Uploaded file must contain exactly 3197 flux values.")
+                except Exception as e:
+                    st.error(f"Error processing file: {e}")
+        
+        elif input_type == "Expert Features (XGBoost)":
+            uploaded_file = st.file_uploader("Upload a CSV with expert features", type=["csv"])
+            if uploaded_file is not None:
+                try:
+                    data = pd.read_csv(uploaded_file)
+                    if all(f in data.columns for f in st.session_state.features_to_use):
+                        data = data[st.session_state.features_to_use].fillna(data[st.session_state.features_to_use].mean(numeric_only=True))
+                        X_new = st.session_state.scaler_xgb.transform(data)
+                        pred_proba = st.session_state.model.predict_proba(X_new)[:, 1][0]
+                        prediction = 1 if pred_proba > 0.3 else 0
+                        label = st.session_state.label_encoder.inverse_transform([prediction])[0]
+                        st.success(f"Prediction: {label} (confidence: {pred_proba:.2%})")
+                    else:
+                        st.error(f"Uploaded file must contain features: {', '.join(st.session_state.features_to_use)}")
+                except Exception as e:
+                    st.error(f"Error processing file: {e}")
+
