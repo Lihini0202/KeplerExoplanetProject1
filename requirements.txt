@@ -1,4 +1,3 @@
---no-cache-dir
 rich>=10.11.0,<14
 streamlit==1.24.1
 tensorflow>=2.13
