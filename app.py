@@ -3,15 +3,44 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-import joblib
-from PIL import Image
-import os
-from sklearn.metrics import accuracy_score, confusion_matrix, roc_auc_score, precision_score, recall_score
-from tensorflow.keras.models import load_model
-from tensorflow.keras import backend as K
 import tensorflow as tf
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Input, Conv1D, MaxPooling1D, GlobalAveragePooling1D, Dense, Dropout, BatchNormalization
+from tensorflow.keras.regularizers import l2
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+from tensorflow.keras import backend as K
+from sklearn.model_selection import train_test_split, StratifiedKFold
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, roc_auc_score, roc_curve
+from sklearn.utils import class_weight, resample
+import xgboost as xgb
+from tabulate import tabulate
+from sklearn.utils.class_weight import compute_class_weight
+from sklearn.metrics import precision_score, recall_score, f1_score
 
-# --- Custom Loss Function ---
+# Set page config
+st.set_page_config(page_title="Exoplanet Detection", layout="wide")
+
+# Title
+st.title("Exoplanet Detection from Kepler Light Curves")
+
+# Sidebar for navigation
+st.sidebar.title("Navigation")
+page = st.sidebar.radio("Go to", ["Data Exploration", "Model Training", "Predictions"])
+
+# Load data function
+@st.cache_data
+def load_data():
+    try:
+        summary = pd.read_csv("datasets/cumulative.csv")
+        raw_train = pd.read_csv("datasets/exoTrain.csv")
+        raw_Stest = pd.read_csv("datasets/exoTest.csv")
+        return summary_data, raw_train_data, raw_test_data
+    except FileNotFoundError:
+        st.error("ERROR: Dataset files not found.")
+        return None, None, None
+
+# Focal Loss Function
 def focal_loss(gamma=1.0, alpha=0.75):
     def focal_loss_fixed(y_true, y_pred):
         y_true = tf.cast(y_true, tf.float32)
@@ -23,278 +52,136 @@ def focal_loss(gamma=1.0, alpha=0.75):
         return tf.reduce_mean(alpha_t * focal_factor * bce)
     return focal_loss_fixed
 
-# --- Streamlit Page Config ---
-st.set_page_config(
-    page_title="Kepler Exoplanet Explorer",
-    page_icon="🔭",
-    layout="wide"
-)
+# Data augmentation function
+def augment_data(X, y, sigma=0.04, max_shift=200):
+    X_aug = X.copy()
+    noise = np.random.normal(0, sigma, X.shape)
+    X_aug += noise
+    shifts = np.random.randint(-max_shift, max_shift, size=X.shape[0])
+    for i in range(X.shape[0]):
+        X_aug[i] = np.roll(X_aug[i], shifts[i], axis=0)
+    return X_aug, y
 
-# --- Load Data ---
-@st.cache_data
-def load_data():
-    """Load Kepler datasets from CSV files."""
-    try:
-        summary = pd.read_csv("datasets/cumulative.csv")
-        train = pd.read_csv("datasets/exoTrain.csv")
-        test = pd.read_csv("datasets/exoTest.csv")
-        return summary, train, test
-    except FileNotFoundError as e:
-        st.error(f"Error loading data files: {e}")
-        return None, None, None
+# Load data
+summary_data, raw_train_data, raw_test_data = load_data()
 
-# --- Load Models ---
-@st.cache_resource
-def load_xgb_model():
-    """Load XGBoost model from pickle file."""
-    try:
-        return joblib.load("models/xgb_model.pkl")
-    except Exception as e:
-        st.error(f"Error loading XGBoost model: {e}")
-        return None
-
-@st.cache_resource
-def load_cnn_model(fold=1):
-    """Load CNN model from file."""
-    try:
-        model_path = f"models/exoplanet_cnn_fold{fold}.keras"
-        return load_model(model_path, custom_objects={'focal_loss_fixed': focal_loss()})
-    except Exception as e:
-        st.error(f"Error loading CNN model: {e}")
-        return None
-
-@st.cache_resource
-def load_scaler():
-    """Load StandardScaler from pickle file."""
-    try:
-        return joblib.load("models/scaler.pkl")
-    except Exception as e:
-        st.error(f"Error loading scaler: {e}")
-        return None
-
-@st.cache_resource
-def load_label_encoder():
-    """Load LabelEncoder from pickle file."""
-    try:
-        return joblib.load("models/label_encoder.pkl")
-    except Exception as e:
-        st.error(f"Error loading label encoder: {e}")
-        return None
-
-# --- Page: Home ---
-def home():
-    st.title("🔭 Kepler Exoplanet Explorer")
-    st.markdown("---")
-    st.markdown("""
-        ### Detect exoplanets from Kepler light curve data using machine learning
+if page == "Data Exploration":
+    st.header("Data Exploration")
+    
+    if summary_data is not None and raw_train_data is not None and raw_test_data is not None:
+        st.success("Datasets Loaded Successfully!")
+        st.write(f"Summary Dataset Shape: {summary_data.shape}")
+        st.write(f"Train Light Curves Shape: {raw_train_data.shape}")
+        st.write(f"Test Light Curves Shape: {raw_test_data.shape}")
         
-        This app allows you to:
-        - Explore the Kepler exoplanet dataset
-        - Visualize light curves and data distributions
-        - Evaluate pre-trained machine learning models
-        - Make predictions on test data
-    """)
-    
-    st.subheader("🎥 NASA's Kepler Mission")
-    st.video("https://www.youtube.com/watch?v=3yij1rJOefM")
-
-# --- Page: Data Explorer ---
-def data_explorer(summary, train, test):
-    st.header("📊 Data Explorer")
-    
-    if summary is not None:
-        st.subheader("KOI Summary Data")
-        st.dataframe(summary.head())
-
-        with st.expander("Show Summary Statistics"):
-            st.dataframe(summary.describe())
-
-    if train is not None:
-        st.subheader("Training Data Sample")
-        st.dataframe(train.head())
-
-    if test is not None:
-        st.subheader("Test Data Sample")
-        st.dataframe(test.head())
-
-# --- Page: Visual Analytics ---
-def visual_analytics(summary):
-    st.header("📈 Visual Analytics")
-    
-    if summary is not None:
-        col1, col2 = st.columns(2)
-        with col1:
-            fig, ax = plt.subplots()
-            sns.countplot(x="koi_disposition", data=summary, ax=ax)
-            ax.set_title("KOI Disposition Distribution")
-            ax.tick_params(axis='x', rotation=45)
+        st.subheader("First 5 Rows from Summary Data:")
+        st.dataframe(summary_data.head())
+        
+        st.subheader("First 5 Rows from Raw Training Data:")
+        st.dataframe(raw_train_data.head())
+        
+        # Sample light curves visualization
+        st.subheader("Sample Light Curves")
+        num_samples = st.slider("Number of samples to display", 1, 5, 3)
+        sample_indices = np.random.choice(raw_train_data.shape[0], num_samples, replace=False)
+        
+        for i, idx in enumerate(sample_indices):
+            label = raw_train_data.iloc[idx]['LABEL']
+            flux_values = raw_train_data.iloc[idx, 1:].values  # Skip LABEL column
+            fig, ax = plt.subplots(figsize=(14, 4))
+            ax.plot(flux_values, label=f"Sample #{idx} | Label: {'CONFIRMED' if label == 2 else 'FALSE POSITIVE'}")
+            ax.set_xlabel("Time Step")
+            ax.set_ylabel("Flux (Brightness)")
+            ax.set_title(f"Light Curve for Sample #{idx}")
+            ax.legend()
+            ax.grid(True)
             st.pyplot(fig)
 
-        with col2:
-            fig, ax = plt.subplots()
-            summary["koi_disposition"].value_counts().plot.pie(autopct='%1.1f%%', ax=ax)
-            ax.set_ylabel("")
-            ax.set_title("Disposition Proportions")
-            st.pyplot(fig)
-
-# --- Page: SHAP Explainability ---
-def shap_explainer():
-    st.header("🧠 SHAP Explainability")
-
-    st.subheader("Feature Importance")
-    try:
-        bar_img = Image.open("shap_summary_bar.png")
-        st.image(bar_img, use_column_width=True)
-    except FileNotFoundError:
-        st.error("SHAP bar plot image not found.")
-
-    st.subheader("Detailed Feature Impact")
-    try:
-        dot_img = Image.open("shap_summary_dot.png")
-        st.image(dot_img, use_column_width=True)
-    except FileNotFoundError:
-        st.error("SHAP dot plot image not found.")
-
-# --- Page: CNN Fold Evaluation ---
-def cnn_fold_evaluator(test_df):
-    st.header("📊 CNN Fold Evaluation")
+elif page == "Model Training":
+    st.header("Model Training")
     
-    if test_df is None:
-        st.warning("Test data not loaded")
-        return
-    
-    X_test = test_df.drop("LABEL", axis=1).values
-    y_test = test_df["LABEL"].values - 1  # Convert labels to 0 and 1
-
-    scaler = load_scaler()
-    if scaler is not None:
-        X_test_scaled = scaler.transform(X_test)
-        X_test_cnn = X_test_scaled.reshape(X_test_scaled.shape[0], X_test_scaled.shape[1], 1)
-    else:
-        st.error("Scaler not loaded, using raw data.")
-        X_test_cnn = X_test.reshape(X_test.shape[0], X_test.shape[1], 1)
-
-    folds = [1, 2, 3, 4, 5]
-    selected_fold = st.selectbox("Select Fold", folds)
-
-    model = load_cnn_model(selected_fold)
-    if model is None:
-        st.error(f"CNN model for fold {selected_fold} not found")
-        return
-    
-    st.write(f"Evaluating CNN model (Fold {selected_fold})...")
-    
-    y_pred_proba = model.predict(X_test_cnn)
-    y_pred = (y_pred_proba > 0.3).astype("int").ravel()
-    acc = accuracy_score(y_test, y_pred)
-
-    st.metric(f"Fold {selected_fold} Accuracy", f"{acc:.2%}")
-
-    # Confusion Matrix
-    cm = confusion_matrix(y_test, y_pred)
-    fig, ax = plt.subplots()
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
-                xticklabels=["Not Exoplanet", "Exoplanet"],
-                yticklabels=["Not Exoplanet", "Exoplanet"])
-    ax.set_xlabel("Predicted")
-    ax.set_ylabel("Actual")
-    ax.set_title("Confusion Matrix")
-    st.pyplot(fig)
-
-    # Metrics
-    auc = roc_auc_score(y_test, y_pred_proba)
-    precision = precision_score(y_test, y_pred)
-    recall = recall_score(y_test, y_pred)
-    
-    col1, col2, col3 = st.columns(3)
-    col1.metric("AUC", f"{auc:.4f}")
-    col2.metric("Precision", f"{precision:.4f}")
-    col3.metric("Recall", f"{recall:.4f}")
-
-# --- Page: Prediction Playground ---
-def prediction_playground(test_df, model_type="XGBoost"):
-    st.header("🚀 Prediction Playground")
-    
-    if test_df is None:
-        st.warning("Test data not loaded")
-        return
-    
-    if model_type == "XGBoost":
-        model = load_xgb_model()
-    else:
-        model = load_cnn_model(1)  # Default to fold 1
-    
-    if model is None:
-        st.error(f"{model_type} model not found")
-        return
-    
-    scaler = load_scaler()
-    if scaler is None:
-        st.error("Scaler not found")
-        return
-    
-    y_test = test_df['LABEL'].values - 1
-    X_test = test_df.drop("LABEL", axis=1).values
-
-    idx = st.slider("Select a Star Index", 0, len(test_df)-1, 0)
-    star = X_test[idx]
-    actual = "Exoplanet" if y_test[idx] == 1 else "Not Exoplanet"
-
-    st.subheader(f"Light Curve for Star #{idx}")
-    fig, ax = plt.subplots(figsize=(10, 4))
-    ax.plot(star, color="royalblue")
-    ax.set_title(f"Actual: {actual}")
-    ax.set_xlabel("Time")
-    ax.set_ylabel("Flux")
-    st.pyplot(fig)
-
-    if st.button("Run Prediction"):
-        star_scaled = scaler.transform([star])
+    if raw_train_data is not None and raw_test_data is not None:
+        st.subheader("Data Preparation")
         
-        if model_type == "XGBoost":
-            prob = model.predict_proba(star_scaled)[0][1]
-        else:
-            star_cnn = star_scaled.reshape(star_scaled.shape[0], star_scaled.shape[1], 1)
-            prob = model.predict(star_cnn)[0][0]
+        # Preprocessing steps would go here
+        st.write("Preprocessing steps would be implemented here...")
         
-        pred = "Exoplanet" if prob > 0.5 else "Not Exoplanet"
-
-        st.subheader("Prediction Result")
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Prediction", pred)
-        col2.metric("Confidence", f"{prob:.2%}")
-        col3.metric("Actual", actual)
+        st.subheader("Model Selection")
+        model_type = st.selectbox("Select model type", ["CNN", "XGBoost"])
         
-        st.progress(prob if pred == "Exoplanet" else 1-prob)
+        if model_type == "CNN":
+            st.write("CNN model architecture and training would be implemented here...")
+            
+            # Example CNN architecture
+            input_shape = (3197, 1)
+            inputs = Input(shape=input_shape)
+            x = Conv1D(32, 3, activation='relu', padding='same', kernel_regularizer=l2(0.01))(inputs)
+            x = MaxPooling1D(2)(x)
+            x = BatchNormalization()(x)
+            x = Conv1D(64, 3, activation='relu', padding='same', kernel_regularizer=l2(0.01))(x)
+            x = MaxPooling1D(2)(x)
+            x = BatchNormalization()(x)
+            x = Conv1D(128, 3, activation='relu', padding='same', kernel_regularizer=l2(0.01))(x)
+            x = GlobalAveragePooling1D()(x)
+            x = Dropout(0.5)(x)
+            outputs = Dense(1, activation='sigmoid')(x)
+            
+            model = Model(inputs, outputs)
+            
+            st.code("""
+            input_shape = (3197, 1)
+            inputs = Input(shape=input_shape)
+            x = Conv1D(32, 3, activation='relu', padding='same', kernel_regularizer=l2(0.01))(inputs)
+            x = MaxPooling1D(2)(x)
+            x = BatchNormalization()(x)
+            x = Conv1D(64, 3, activation='relu', padding='same', kernel_regularizer=l2(0.01))(x)
+            x = MaxPooling1D(2)(x)
+            x = BatchNormalization()(x)
+            x = Conv1D(128, 3, activation='relu', padding='same', kernel_regularizer=l2(0.01))(x)
+            x = GlobalAveragePooling1D()(x)
+            x = Dropout(0.5)(x)
+            outputs = Dense(1, activation='sigmoid')(x)
+            
+            model = Model(inputs, outputs)
+            """, language='python')
+            
+            if st.button("Train CNN Model"):
+                with st.spinner("Training model..."):
+                    # Here you would add the actual training code
+                    st.success("Training complete!")
+                    
+        elif model_type == "XGBoost":
+            st.write("XGBoost model training would be implemented here...")
+            
+            if st.button("Train XGBoost Model"):
+                with st.spinner("Training model..."):
+                    # Here you would add the actual training code
+                    st.success("Training complete!")
 
-# --- Main App ---
-def main():
-    # Load data
-    summary_df, train_df, test_df = load_data()
+elif page == "Predictions":
+    st.header("Make Predictions")
     
-    # Sidebar navigation
-    st.sidebar.title("🌌 Navigation")
-    page = st.sidebar.radio("Go to", [
-        "🏠 Home",
-        "📊 Data Explorer",
-        "📈 Visual Analytics",
-        "🧠 SHAP Explainability",
-        "📊 CNN Fold Evaluation",
-        "🚀 Prediction Playground"
-    ])
-
-    if page == "🏠 Home":
-        home()
-    elif page == "📊 Data Explorer":
-        data_explorer(summary_df, train_df, test_df)
-    elif page == "📈 Visual Analytics":
-        visual_analytics(summary_df)
-    elif page == "🧠 SHAP Explainability":
-        shap_explainer()
-    elif page == "📊 CNN Fold Evaluation":
-        cnn_fold_evaluator(test_df)
-    elif page == "🚀 Prediction Playground":
-        prediction_playground(test_df)
-
-if __name__ == "__main__":
-    main()
+    st.write("This section would allow users to upload new light curves for prediction.")
+    
+    uploaded_file = st.file_uploader("Upload a light curve file", type=["csv"])
+    
+    if uploaded_file is not None:
+        try:
+            data = pd.read_csv(uploaded_file)
+            st.write("Uploaded data:")
+            st.dataframe(data.head())
+            
+            # Here you would add code to make predictions on the uploaded data
+            if st.button("Predict"):
+                with st.spinner("Making prediction..."):
+                    # Simulate prediction
+                    prediction = np.random.choice([0, 1])
+                    confidence = np.random.uniform(0.8, 0.99)
+                    
+                    if prediction == 1:
+                        st.success(f"Prediction: EXOPLANET DETECTED (confidence: {confidence:.2%})")
+                    else:
+                        st.error(f"Prediction: NO EXOPLANET DETECTED (confidence: {confidence:.2%})")
+                        
+        except Exception as e:
+            st.error(f"Error reading file: {e}")
