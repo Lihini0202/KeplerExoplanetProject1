@@ -1,4 +1,4 @@
-numpy==1.24.4
+numpy==1.23.5
 rich>=10.11.0,<14
 streamlit==1.24.1
 tensorflow>=2.13
