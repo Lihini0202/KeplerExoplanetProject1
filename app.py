@@ -32,9 +32,9 @@ page = st.sidebar.radio("Go to", ["Data Exploration", "Model Training", "Predict
 @st.cache_data
 def load_data():
     try:
-        summary = pd.read_csv("datasets/cumulative.csv")
-        raw_train = pd.read_csv("datasets/exoTrain.csv")
-        raw_Stest = pd.read_csv("datasets/exoTest.csv")
+        summary_data = pd.read_csv("datasets/cumulative.csv")
+        raw_train_data = pd.read_csv("datasets/exoTrain.csv")
+        raw_test_data = pd.read_csv("datasets/exoTest.csv")
         return summary_data, raw_train_data, raw_test_data
     except FileNotFoundError:
         st.error("ERROR: Dataset files not found.")
