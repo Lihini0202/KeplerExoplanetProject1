@@ -30,7 +30,7 @@ st.markdown("""
         background-color: #f0f2f6 !important;
     }
     .main {
-        background-color: #f0f2f6 !important;
+        background-color: black !important;
     }
     .stButton>button {
         background-color: #4CAF50 !important;
