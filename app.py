@@ -15,6 +15,7 @@ import joblib
 import matplotlib.pyplot as plt
 import seaborn as sns
 import shap
+import pickle
 import os
 import gc
 from tabulate import tabulate
@@ -23,19 +24,8 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from scipy import signal
 from streamlit_extras.metric_cards import style_metric_cards
-import matplotlib as mpl
 
-# Define the color palette
-COLOR_PALETTE = {
-    'coral_red': '#FF6B6B',
-    'teal': '#4ECDC4',
-    'light_blue': '#45B7D1'
-}
-
-# Set Matplotlib color cycle to match the palette
-mpl.rcParams['axes.prop_cycle'] = mpl.cycler(color=list(COLOR_PALETTE.values()))
-
-# Initialize session state
+# Initialize session state and memory management
 def initialize_session_state():
     """Initialize all session state variables"""
     session_vars = {
@@ -68,9 +58,9 @@ def clear_memory():
     if 'xgb_model' in st.session_state:
         del st.session_state.xgb_model
 
-# Custom CSS to enforce color palette
+# Custom CSS for styling with vibrant colors
 def setup_page_config():
-    """Configure page settings and styles with restricted color palette"""
+    """Configure page settings and styles"""
     st.set_page_config(
         page_title="Exoplanet Detection Dashboard",
         layout="wide",
@@ -78,79 +68,58 @@ def setup_page_config():
         page_icon="🌌"
     )
     
-    st.markdown(f"""
+    st.markdown("""
         <style>
-        :root {{
-            background-color: {COLOR_PALETTE['teal']} !important;
-        }}
-        .main {{
-            background-color: {COLOR_PALETTE['teal']} !important;
-            color: {COLOR_PALETTE['light_blue']} !important;
-        }}
-        .stSidebar {{
-            background-color: {COLOR_PALETTE['coral_red']} !important;
-            color: {COLOR_PALETTE['light_blue']} !important;
-        }}
-        .stSidebar [data-testid="stSidebarNav"] {{
-            background-color: {COLOR_PALETTE['coral_red']} !important;
-        }}
-        .stTabs [data-baseweb="tab-list"] {{
+        :root {
+            background-color: #f0f2f6 !important;
+        }
+        .main {
+            background-color: black !important;
+        }
+        .stTabs [data-baseweb="tab-list"] {
             gap: 10px;
-            background-color: {COLOR_PALETTE['teal']} !important;
-        }}
-        .stTabs [data-baseweb="tab"] {{
+        }
+        .stTabs [data-baseweb="tab"] {
             height: 50px;
             padding: 0 25px;
-            background-color: {COLOR_PALETTE['coral_red']} !important;
-            color: {COLOR_PALETTE['light_blue']} !important;
+            background-color: #f8f9fa;
             border-radius: 8px 8px 0px 0px;
-            font-weight: bold;
-        }}
-        .stTabs [aria-selected="true"] {{
-            background-color: {COLOR_PALETTE['light_blue']} !important;
-            color: {COLOR_PALETTE['teal']} !important;
-        }}
-        .stTabs [data-baseweb="tab-highlight"] {{
-            background-color: {COLOR_PALETTE['coral_red']} !important;
-        }}
-        .stButton>button {{
+            gap: 10px;
+        }
+        .stTabs [aria-selected="true"] {
+            background-color: #ffffff;
+        }
+        .stTabs [data-baseweb="tab-highlight"] {
+            background-color: #FF6B6B;
+        }
+        .stButton>button {
             border-radius: 8px;
             height: 40px;
             width: 100%;
-            background-color: {COLOR_PALETTE['coral_red']} !important;
-            color: {COLOR_PALETTE['light_blue']} !important;
+            background-color: #4CAF50 !important;
+            color: white !important;
             font-weight: bold;
-            border: none;
-        }}
-        .stButton>button:hover {{
-            background-color: {COLOR_PALETTE['light_blue']} !important;
-            color: {COLOR_PALETTE['teal']} !important;
-        }}
-        .stDataFrame {{
+        }
+        .stButton>button:hover {
+            background-color: #45a049 !important;
+        }
+        .stDataFrame {
             border-radius: 8px;
-            background-color: {COLOR_PALETTE['teal']} !important;
-            color: {COLOR_PALETTE['light_blue']} !important;
-        }}
-        .plot-container {{
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .plot-container {
             border-radius: 8px;
-            background-color: {COLOR_PALETTE['teal']} !important;
-            color: {COLOR_PALETTE['light_blue']} !important;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             padding: 20px;
-        }}
-        .metric-card {{
-            background-color: {COLOR_PALETTE['teal']} !important;
-            color: {COLOR_PALETTE['light_blue']} !important;
+            background-color: white;
+        }
+        .metric-card {
+            background-color: white;
             border-radius: 8px;
             padding: 15px;
-        }}
-        .stTextInput input, .stTextArea textarea, .stSelectbox, .stSlider div {{
-            background-color: {COLOR_PALETTE['teal']} !important;
-            color: {COLOR_PALETTE['light_blue']} !important;
-            border-color: {COLOR_PALETTE['coral_red']} !important;
-        }}
-        h1, h2, h3, h4, h5, h6, p, div, span {{
-            color: {COLOR_PALETTE['light_blue']} !important;
-        }}
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
         </style>
     """, unsafe_allow_html=True)
 
@@ -166,7 +135,7 @@ def focal_loss(gamma=2.0, alpha=0.5):
         return tf.reduce_mean(alpha_t * focal_factor * bce)
     return focal_loss_fixed
 
-# Load datasets with caching
+# Load datasets with caching and error handling
 @st.cache_data(show_spinner="Loading datasets...")
 def load_data():
     """Load and cache datasets with error handling"""
@@ -184,9 +153,9 @@ def load_data():
         st.error(f"Error loading datasets: {e}")
         st.stop()
 
-# Light curve visualization
+# Light curve visualization with error handling
 def plot_light_curves(data, n_samples=5):
-    """Visualize sample light curves with restricted color palette"""
+    """Visualize sample light curves with error handling"""
     try:
         exoplanet_samples = data[data['LABEL'] == 2].sample(n=min(n_samples, len(data[data['LABEL'] == 2])))
         non_exoplanet_samples = data[data['LABEL'] == 1].sample(n=min(n_samples, len(data[data['LABEL'] == 1])))
@@ -200,7 +169,7 @@ def plot_light_curves(data, n_samples=5):
                     y=row[1:],
                     mode='lines',
                     name=f'Exoplanet Star {idx}',
-                    line=dict(color=COLOR_PALETTE['coral_red'])
+                    line=dict(color='#FF6B6B')
                 ),
                 row=1, col=1
             )
@@ -212,7 +181,7 @@ def plot_light_curves(data, n_samples=5):
                     y=row[1:],
                     mode='lines',
                     name=f'Non-Exoplanet Star {idx}',
-                    line=dict(color=COLOR_PALETTE['teal'])
+                    line=dict(color='#4ECDC4')
                 ),
                 row=1, col=2
             )
@@ -221,21 +190,20 @@ def plot_light_curves(data, n_samples=5):
             height=400,
             showlegend=False,
             margin=dict(l=20, r=20, t=40, b=20),
-            paper_bgcolor=COLOR_PALETTE['teal'],
-            plot_bgcolor=COLOR_PALETTE['teal'],
-            font=dict(color=COLOR_PALETTE['light_blue'])
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)'
         )
         
-        fig_plotly.update_xaxes(title_text="Time", title_font=dict(color=COLOR_PALETTE['light_blue']), row=1, col=1)
-        fig_plotly.update_xaxes(title_text="Time", title_font=dict(color=COLOR_PALETTE['light_blue']), row=1, col=2)
-        fig_plotly.update_yaxes(title_text="Flux", title_font=dict(color=COLOR_PALETTE['light_blue']), row=1, col=2)
+        fig_plotly.update_xaxes(title_text="Time", row=1, col=1)
+        fig_plotly.update_xaxes(title_text="Time", row=1, col=2)
+        fig_plotly.update_yaxes(title_text="Flux", row=1, col=2)
         
         return fig_plotly
     except Exception as e:
         st.error(f"Error generating light curves: {e}")
         return None
 
-# Model loading functions
+# Model loading functions with memory management
 def load_cnn_model():
     """Safely load CNN model with memory cleanup"""
     try:
@@ -268,20 +236,24 @@ def load_xgb_model():
 
 # Data Preprocessing Interface
 def preprocessing_interface(raw_data, summary_data):
-    """Render the data preprocessing interface"""
+    """Render the data preprocessing interface with actual preprocessing logic"""
     st.header("🔧 Data Preprocessing Options")
     
+    # Initialize session state for preprocessed data
     if 'preprocessed_raw_data' not in st.session_state:
         st.session_state.preprocessed_raw_data = raw_data.copy()
     if 'preprocessed_summary_data' not in st.session_state:
         st.session_state.preprocessed_summary_data = summary_data.copy()
     
+    # Multiselect for preprocessing steps
     preprocessing_options = st.multiselect(
         "Select Preprocessing Steps",
         options=["Normalization", "Standardization", "Detrending", "Outlier Removal", "Data Augmentation"],
-        default=st.session_state.preprocessing_options
+        default=st.session_state.preprocessing_options,
+        help="Choose preprocessing steps to apply to the datasets."
     )
     
+    # Configuration for preprocessing steps
     norm_min, norm_max = -1.0, 1.0
     outlier_threshold = 2.0
     
@@ -295,18 +267,22 @@ def preprocessing_interface(raw_data, summary_data):
         outlier_threshold = st.select_slider(
             "Outlier Threshold (IQR multiplier)",
             options=[1.5, 2.0, 2.5, 3.0],
-            value=2.0
+            value=2.0,
+            help="Higher values keep more data points; lower values are more aggressive."
         )
     
     if st.button("Apply Preprocessing"):
         with st.spinner("Applying preprocessing..."):
             try:
+                # Make copies of the original data
                 processed_raw_data = raw_data.copy()
                 processed_summary_data = summary_data.copy()
                 
+                # Get flux columns for raw_data (excluding 'LABEL')
                 flux_cols = [col for col in raw_data.columns if col != 'LABEL']
                 numeric_cols = summary_data.select_dtypes(include=[np.number]).columns
                 
+                # 1. Normalization
                 if "Normalization" in preprocessing_options:
                     scaler = MinMaxScaler(feature_range=(norm_min, norm_max))
                     processed_raw_data[flux_cols] = scaler.fit_transform(processed_raw_data[flux_cols])
@@ -315,6 +291,7 @@ def preprocessing_interface(raw_data, summary_data):
                         processed_summary_data[valid_cols] = scaler.fit_transform(processed_summary_data[valid_cols])
                     st.success("Normalization applied!")
                 
+                # 2. Standardization
                 if "Standardization" in preprocessing_options:
                     scaler = StandardScaler()
                     processed_raw_data[flux_cols] = scaler.fit_transform(processed_raw_data[flux_cols])
@@ -325,6 +302,7 @@ def preprocessing_interface(raw_data, summary_data):
                     st.session_state.scaler_xgb = scaler
                     st.success("Standardization applied!")
                 
+                # 3. Detrending (for raw_data only)
                 if "Detrending" in preprocessing_options:
                     for idx in processed_raw_data.index:
                         flux = processed_raw_data.loc[idx, flux_cols].values
@@ -332,6 +310,7 @@ def preprocessing_interface(raw_data, summary_data):
                         processed_raw_data.loc[idx, flux_cols] = trend
                     st.success("Detrending applied to light curves!")
                 
+                # 4. Outlier Removal
                 if "Outlier Removal" in preprocessing_options:
                     for col in flux_cols:
                         Q1 = processed_raw_data[col].quantile(0.25)
@@ -350,6 +329,7 @@ def preprocessing_interface(raw_data, summary_data):
                             processed_summary_data[col] = processed_summary_data[col].clip(lower=lower_bound, upper=upper_bound)
                     st.success("Outlier removal applied!")
                 
+                # 5. Data Augmentation (for raw_data only)
                 if "Data Augmentation" in preprocessing_options:
                     exoplanet_data = processed_raw_data[processed_raw_data['LABEL'] == 2]
                     n_samples = len(processed_raw_data[processed_raw_data['LABEL'] == 1]) - len(exoplanet_data)
@@ -360,10 +340,12 @@ def preprocessing_interface(raw_data, summary_data):
                         processed_raw_data = pd.concat([processed_raw_data, augmented_data], ignore_index=True)
                     st.success(f"Data augmentation applied: added {n_samples} synthetic exoplanet samples!")
                 
+                # Save preprocessed data to session state
                 st.session_state.preprocessed_raw_data = processed_raw_data
                 st.session_state.preprocessed_summary_data = processed_summary_data
                 st.session_state.preprocessing_options = preprocessing_options
                 
+                # Display summary of preprocessed data
                 st.subheader("Preprocessing Summary")
                 col1, col2 = st.columns(2)
                 with col1:
@@ -373,6 +355,7 @@ def preprocessing_interface(raw_data, summary_data):
                     st.metric("Summary Data Rows", len(processed_summary_data))
                     st.metric("Confirmed Exoplanets", len(processed_summary_data[processed_summary_data['koi_disposition'] == 'CONFIRMED']))
                 
+                # Visualize sample light curves after preprocessing
                 st.subheader("Sample Light Curves (Post-Preprocessing)")
                 fig_plotly = plot_light_curves(processed_raw_data, 3)
                 if fig_plotly:
@@ -383,6 +366,7 @@ def preprocessing_interface(raw_data, summary_data):
             except Exception as e:
                 st.error(f"Error applying preprocessing: {e}")
     
+    # Option to reset to original data
     if st.button("Reset to Original Data"):
         st.session_state.preprocessed_raw_data = raw_data.copy()
         st.session_state.preprocessed_summary_data = summary_data.copy()
@@ -392,10 +376,9 @@ def preprocessing_interface(raw_data, summary_data):
 
 # Landing Page
 def landing_page():
-    """Render the landing page"""
+    """Render the landing page with project overview"""
     st.title("🌌 Exoplanet Detection Dashboard")
-    st.markdown(f"""
-    <div style="color: {COLOR_PALETTE['light_blue']}">
+    st.markdown("""
     ## Discover Exoplanets Through Machine Learning
     
     This interactive dashboard allows you to:
@@ -409,21 +392,20 @@ def landing_page():
     🔮 **Predictions**: Classify new observations as exoplanet or non-exoplanet  
     
     *Navigate using the sidebar to get started!*
-    </div>
     """, unsafe_allow_html=True)
     
+    # Add an interactive element
     if st.button("🚀 Quick Start Guide"):
         with st.expander("Getting Started"):
-            st.markdown(f"""
-            <div style="color: {COLOR_PALETTE['light_blue']}">
+            st.markdown("""
             1. **Data Exploration**: View light curves and dataset statistics
             2. **Model Training**: Load pre-trained models or train new ones
             3. **Predictions**: Upload new data for classification
             
             Pro Tip: Start with the Data Exploration tab to understand the dataset!
-            </div>
             """, unsafe_allow_html=True)
     
+    # Add a sample visualization
     _, raw_data, summary_data = load_data()
     if st.session_state.preprocessed_raw_data is not None:
         fig_plotly = plot_light_curves(st.session_state.preprocessed_raw_data, 2)
@@ -438,6 +420,7 @@ def model_comparison_interface():
     st.header("📊 Model Performance Comparison")
     
     if st.session_state.cnn_model and st.session_state.xgb_model:
+        # Placeholder comparison metrics (replace with actual metrics from your models)
         comparison_data = pd.DataFrame({
             'Metric': ['Accuracy', 'Precision', 'Recall', 'F1 Score', 'Training Time'],
             'CNN': [0.92, 0.89, 0.85, 0.87, '2 min 30 sec'],
@@ -446,10 +429,7 @@ def model_comparison_interface():
         
         col1, col2 = st.columns(2)
         with col1:
-            st.dataframe(comparison_data.style.apply(
-                lambda x: ['background-color: ' + COLOR_PALETTE['teal'] for val in x],
-                axis=1
-            ))
+            st.dataframe(comparison_data.style.highlight_max(axis=1))
         
         with col2:
             fig_plotly = px.bar(
@@ -459,21 +439,14 @@ def model_comparison_interface():
                 color='variable',
                 barmode='group', 
                 title='Model Comparison',
-                color_discrete_map={'CNN': COLOR_PALETTE['coral_red'], 'XGBoost': COLOR_PALETTE['teal']}
-            )
-            fig_plotly.update_layout(
-                paper_bgcolor=COLOR_PALETTE['teal'],
-                plot_bgcolor=COLOR_PALETTE['teal'],
-                font=dict(color=COLOR_PALETTE['light_blue'])
+                color_discrete_map={'CNN': '#FF6B6B', 'XGBoost': '#4ECDC4'}
             )
             st.plotly_chart(fig_plotly, use_container_width=True)
         
-        st.markdown(f"""
-        <div style="color: {COLOR_PALETTE['light_blue']}">
+        st.markdown("""
         ### When to use each model:
         - **CNN**: Best for raw light curve data, captures temporal patterns  
         - **XGBoost**: Best for tabular feature data, faster training  
-        </div>
         """, unsafe_allow_html=True)
     else:
         st.warning("Please load both CNN and XGBoost models to enable comparison")
@@ -551,18 +524,7 @@ def prediction_analysis():
                     color="Prediction",
                     nbins=20, 
                     title="Confidence Scores Distribution",
-                    color_discrete_map={
-                        'Exoplanet': COLOR_PALETTE['coral_red'], 
-                        'Non-Exoplanet': COLOR_PALETTE['teal'], 
-                        'CONFIRMED': COLOR_PALETTE['coral_red'], 
-                        'CANDIDATE': COLOR_PALETTE['light_blue'], 
-                        'FALSE POSITIVE': COLOR_PALETTE['teal']
-                    }
-                )
-                fig_plotly.update_layout(
-                    paper_bgcolor=COLOR_PALETTE['teal'],
-                    plot_bgcolor=COLOR_PALETTE['teal'],
-                    font=dict(color=COLOR_PALETTE['light_blue'])
+                    color_discrete_map={'Exoplanet': '#FF6B6B', 'Non-Exoplanet': '#4ECDC4', 'CONFIRMED': '#FF6B6B', 'CANDIDATE': '#45B7D1', 'FALSE POSITIVE': '#4ECDC4'}
                 )
                 st.plotly_chart(fig_plotly, use_container_width=True)
             except Exception as e:
@@ -578,14 +540,9 @@ def prediction_analysis():
                         labels={'x': 'Features', 'y': 'Importance'},
                         title='XGBoost Feature Importance',
                         color=st.session_state.xgb_model.feature_importances_,
-                        color_continuous_map=[COLOR_PALETTE['teal'], COLOR_PALETTE['coral_red'], COLOR_PALETTE['light_blue']]
+                        color_continuous_scale='RdYlGn'
                     )
-                    fig_plotly.update_layout(
-                        xaxis_tickangle=-45,
-                        paper_bgcolor=COLOR_PALETTE['teal'],
-                        plot_bgcolor=COLOR_PALETTE['teal'],
-                        font=dict(color=COLOR_PALETTE['light_blue'])
-                    )
+                    fig_plotly.update_layout(xaxis_tickangle=-45)
                     st.plotly_chart(fig_plotly, use_container_width=True)
                 except Exception as e:
                     st.warning(f"Failed to plot feature importance: {str(e)}")
@@ -595,10 +552,7 @@ def prediction_analysis():
         with tab3:
             st.subheader("Misclassification Analysis")
             st.write("Examples of misclassified observations (placeholder):")
-            st.dataframe(results.head().style.apply(
-                lambda x: ['background-color: ' + COLOR_PALETTE['teal'] for val in x],
-                axis=1
-            ))
+            st.dataframe(results.head())
     else:
         st.warning("No prediction results available. Make predictions first!")
 
@@ -623,12 +577,13 @@ def data_exploration_page(raw_data, summary_data):
     st.title("📊 Data Exploration")
     st.markdown("---")
     
-    if st.session_state.preprocessed_raw_data is None or st.session_state.preprocessed_summary_data is None:
-        st.error("Preprocessed data not initialized. Please load data or apply preprocessing.")
-        return
-    
+    # Use preprocessed data
     raw_data = st.session_state.preprocessed_raw_data
     summary_data = st.session_state.preprocessed_summary_data
+    
+    if raw_data is None or summary_data is None:
+        st.error("Preprocessed data not initialized. Please load data or apply preprocessing.")
+        return
     
     tab1, tab2 = st.tabs(["Light Curve Data", "Summary Data"])
     
@@ -662,13 +617,8 @@ def data_exploration_page(raw_data, summary_data):
                     raw_data[raw_data['LABEL'] == 2].iloc[:, 1:].mean(axis=1),
                     nbins=50,
                     title="Exoplanet Stars Flux Distribution",
-                    color_discrete_sequence=[COLOR_PALETTE['coral_red']],
+                    color_discrete_sequence=['#FF6B6B'],
                     labels={'value': 'Average Flux'}
-                )
-                fig_plotly.update_layout(
-                    paper_bgcolor=COLOR_PALETTE['teal'],
-                    plot_bgcolor=COLOR_PALETTE['teal'],
-                    font=dict(color=COLOR_PALETTE['light_blue'])
                 )
                 st.plotly_chart(fig_plotly, use_container_width=True)
             except Exception as e:
@@ -680,13 +630,8 @@ def data_exploration_page(raw_data, summary_data):
                     raw_data[raw_data['LABEL'] == 1].iloc[:, 1:].mean(axis=1),
                     nbins=50,
                     title="Non-Exoplanet Stars Flux Distribution",
-                    color_discrete_sequence=[COLOR_PALETTE['teal']],
+                    color_discrete_sequence=['#4ECDC4'],
                     labels={'value': 'Average Flux'}
-                )
-                fig_plotly.update_layout(
-                    paper_bgcolor=COLOR_PALETTE['teal'],
-                    plot_bgcolor=COLOR_PALETTE['teal'],
-                    font=dict(color=COLOR_PALETTE['light_blue'])
                 )
                 st.plotly_chart(fig_plotly, use_container_width=True)
             except Exception as e:
@@ -710,12 +655,7 @@ def data_exploration_page(raw_data, summary_data):
                 summary_data,
                 names='koi_disposition',
                 hole=0.3,
-                color_discrete_sequence=[COLOR_PALETTE['coral_red'], COLOR_PALETTE['teal'], COLOR_PALETTE['light_blue']]
-            )
-            fig_plotly.update_layout(
-                paper_bgcolor=COLOR_PALETTE['teal'],
-                plot_bgcolor=COLOR_PALETTE['teal'],
-                font=dict(color=COLOR_PALETTE['light_blue'])
+                color_discrete_sequence=['#FF6B6B', '#4ECDC4', '#45B7D1']
             )
             st.plotly_chart(fig_plotly, use_container_width=True)
         except Exception as e:
@@ -738,12 +678,7 @@ def data_exploration_page(raw_data, summary_data):
                 marginal="box",
                 nbins=50,
                 barmode='overlay',
-                color_discrete_sequence=[COLOR_PALETTE['coral_red'], COLOR_PALETTE['teal'], COLOR_PALETTE['light_blue']]
-            )
-            fig_plotly.update_layout(
-                paper_bgcolor=COLOR_PALETTE['teal'],
-                plot_bgcolor=COLOR_PALETTE['teal'],
-                font=dict(color=COLOR_PALETTE['light_blue'])
+                color_discrete_sequence=['#FF6B6B', '#4ECDC4', '#45B7D1']
             )
             st.plotly_chart(fig_plotly, use_container_width=True)
         except Exception as e:
@@ -755,12 +690,13 @@ def model_training_page(raw_data, summary_data):
     st.title("🤖 Model Training")
     st.markdown("---")
     
-    if st.session_state.preprocessed_raw_data is None or st.session_state.preprocessed_summary_data is None:
-        st.error("Preprocessed data not initialized. Please load data or apply preprocessing.")
-        return
-    
+    # Use preprocessed data
     raw_data = st.session_state.preprocessed_raw_data
     summary_data = st.session_state.preprocessed_summary_data
+    
+    if raw_data is None or summary_data is None:
+        st.error("Preprocessed data not initialized. Please load data or apply preprocessing.")
+        return
     
     tab1, tab2 = st.tabs(["CNN Model", "XGBoost Model"])
     
@@ -777,6 +713,7 @@ def model_training_page(raw_data, summary_data):
                     st.session_state.cnn_model.summary(print_fn=lambda x: model_summary.append(x))
                     st.text("\n".join(model_summary))
                     
+                    # Generate sample predictions plot
                     try:
                         if raw_data is None or raw_data.empty:
                             st.warning("No preprocessed raw data available for predictions.")
@@ -791,12 +728,7 @@ def model_training_page(raw_data, summary_data):
                                     names='Prediction',
                                     title='Sample Prediction Distribution',
                                     color='Prediction',
-                                    color_discrete_map={'Exoplanet': COLOR_PALETTE['coral_red'], 'Non-Exoplanet': COLOR_PALETTE['teal']}
-                                )
-                                fig_plotly.update_layout(
-                                    paper_bgcolor=COLOR_PALETTE['teal'],
-                                    plot_bgcolor=COLOR_PALETTE['teal'],
-                                    font=dict(color=COLOR_PALETTE['light_blue'])
+                                    color_discrete_map={'Exoplanet': '#FF6B6B', 'Non-Exoplanet': '#4ECDC4'}
                                 )
                                 st.plotly_chart(fig_plotly, use_container_width=True)
                             else:
@@ -810,12 +742,14 @@ def model_training_page(raw_data, summary_data):
                     try:
                         clear_memory()
                         
+                        # Data preparation
                         X_cnn = raw_data.drop(columns=['LABEL']).values
                         y_cnn = raw_data['LABEL'].values - 1
                         scaler_cnn = StandardScaler()
                         X_cnn_scaled = scaler_cnn.fit_transform(X_cnn)
                         X_cnn = X_cnn_scaled.reshape(X_cnn_scaled.shape[0], X_cnn_scaled.shape[1], 1)
                         
+                        # Handle class imbalance
                         confirmed_indices = np.where(y_cnn == 1)[0]
                         X_confirmed = X_cnn[confirmed_indices]
                         y_confirmed = y_cnn[confirmed_indices]
@@ -823,9 +757,11 @@ def model_training_page(raw_data, summary_data):
                         X_train_oversampled = np.vstack([X_cnn] + [X_confirmed] * oversample_factor)
                         y_train_oversampled = np.hstack([y_cnn] + [y_confirmed] * oversample_factor)
                         
+                        # Class weights
                         class_weights = compute_class_weight('balanced', classes=np.unique(y_train_oversampled), y=y_train_oversampled)
                         class_weight_dict = {i: class_weights[i] for i in range(len(class_weights))}
                         
+                        # Build model with user-defined configuration
                         inputs = Input(shape=(X_cnn.shape[1], 1))
                         x = inputs
                         for i in range(st.session_state.cnn_config['conv_layers']):
@@ -843,6 +779,7 @@ def model_training_page(raw_data, summary_data):
                         outputs = Dense(1, activation='sigmoid')(x)
                         model = Model(inputs, outputs)
                         
+                        # Training configuration
                         model.compile(
                             optimizer=tf.keras.optimizers.Adam(learning_rate=st.session_state.cnn_config['learning_rate']),
                             loss=focal_loss(gamma=2.0, alpha=0.5),
@@ -851,6 +788,7 @@ def model_training_page(raw_data, summary_data):
                         early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
                         lr_scheduler = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=3, min_lr=1e-6)
                         
+                        # Training with progress
                         progress_bar = st.progress(0)
                         status_text = st.empty()
                         
@@ -870,36 +808,36 @@ def model_training_page(raw_data, summary_data):
                             verbose=0
                         )
                         
+                        # Save model and update session state
                         model.save('models/cnn_exoplanet_model.keras')
                         joblib.dump(scaler_cnn, 'models/scaler_cnn.pkl')
                         st.session_state.cnn_model = model
                         st.session_state.scaler_cnn = scaler_cnn
                         
+                        # Display results
                         st.success("CNN model trained and saved successfully!")
                         progress_bar.empty()
                         status_text.empty()
                         
+                        # Plot training history
                         fig_plotly = go.Figure()
                         fig_plotly.add_trace(go.Scatter(
                             y=history.history['loss'],
                             mode='lines',
                             name='Training Loss',
-                            line=dict(color=COLOR_PALETTE['coral_red'])
+                            line=dict(color='#FF6B6B')
                         ))
                         fig_plotly.add_trace(go.Scatter(
                             y=history.history['val_loss'],
                             mode='lines',
                             name='Validation Loss',
-                            line=dict(color=COLOR_PALETTE['teal'])
+                            line=dict(color='#4ECDC4')
                         ))
                         fig_plotly.update_layout(
                             title='Training History',
                             xaxis_title='Epoch',
                             yaxis_title='Loss',
-                            hovermode="x unified",
-                            paper_bgcolor=COLOR_PALETTE['teal'],
-                            plot_bgcolor=COLOR_PALETTE['teal'],
-                            font=dict(color=COLOR_PALETTE['light_blue'])
+                            hovermode="x unified"
                         )
                         st.plotly_chart(fig_plotly, use_container_width=True)
                         
@@ -936,14 +874,9 @@ def model_training_page(raw_data, summary_data):
                             labels={'x': 'Features', 'y': 'Importance'},
                             title='Feature Importance (Pre-Trained Model)',
                             color=st.session_state.xgb_model.feature_importances_,
-                            color_continuous_map=[COLOR_PALETTE['teal'], COLOR_PALETTE['coral_red'], COLOR_PALETTE['light_blue']]
+                            color_continuous_scale='RdYlGn'
                         )
-                        fig_plotly.update_layout(
-                            xaxis_tickangle=-45,
-                            paper_bgcolor=COLOR_PALETTE['teal'],
-                            plot_bgcolor=COLOR_PALETTE['teal'],
-                            font=dict(color=COLOR_PALETTE['light_blue'])
-                        )
+                        fig_plotly.update_layout(xaxis_tickangle=-45)
                         st.plotly_chart(fig_plotly, use_container_width=True)
                         
                         st.subheader("SHAP Feature Importance")
@@ -957,12 +890,6 @@ def model_training_page(raw_data, summary_data):
                             feature_names=st.session_state.features_to_use, 
                             show=False
                         )
-                        ax.set_facecolor(COLOR_PALETTE['teal'])
-                        fig_mpl.set_facecolor(COLOR_PALETTE['teal'])
-                        ax.tick_params(colors=COLOR_PALETTE['light_blue'])
-                        ax.title.set_color(COLOR_PALETTE['light_blue'])
-                        ax.xaxis.label.set_color(COLOR_PALETTE['light_blue'])
-                        ax.yaxis.label.set_color(COLOR_PALETTE['light_blue'])
                         st.pyplot(fig_mpl)
                         plt.close(fig_mpl)
                         
@@ -975,6 +902,7 @@ def model_training_page(raw_data, summary_data):
                     try:
                         clear_memory()
                         
+                        # Feature selection
                         try:
                             st.session_state.features_to_use = joblib.load('models/features_to_use.pkl')
                         except:
@@ -985,10 +913,12 @@ def model_training_page(raw_data, summary_data):
                                 st.error("No numeric features found in summary_data.")
                                 st.stop()
                         
+                        # Data preparation
                         X_xgb = summary_data[st.session_state.features_to_use]
                         X_xgb = X_xgb.dropna(axis=1, how='all').replace([np.inf, -np.inf], np.nan)
                         X_xgb = X_xgb.fillna(X_xgb.mean(numeric_only=True))
                         
+                        # Label encoding with verification
                         if 'label_encoded' not in summary_data.columns:
                             st.session_state.label_encoder = LabelEncoder()
                             summary_data['label_encoded'] = st.session_state.label_encoder.fit_transform(summary_data['koi_disposition'])
@@ -997,10 +927,12 @@ def model_training_page(raw_data, summary_data):
                         y_xgb = summary_data['label_encoded']
                         st.session_state.num_classes = len(np.unique(y_xgb))
                         
+                        # Verify data shapes before splitting
                         if len(X_xgb) != len(y_xgb):
                             st.error(f"Feature and target arrays have different lengths: X({len(X_xgb)}) vs y({len(y_xgb)})")
                             st.stop()
                         
+                        # Train-test split with stratification
                         X_train_xgb, X_test_xgb, y_train_xgb, y_test_xgb = train_test_split(
                             X_xgb, y_xgb, 
                             test_size=0.3, 
@@ -1008,10 +940,12 @@ def model_training_page(raw_data, summary_data):
                             random_state=42
                         )
                         
+                        # Feature scaling
                         scaler_xgb = StandardScaler()
                         X_train_xgb = scaler_xgb.fit_transform(X_train_xgb)
                         X_test_xgb = scaler_xgb.transform(X_test_xgb)
                         
+                        # Model configuration based on number of classes
                         if st.session_state.num_classes > 2:
                             objective = 'multi:softprob'
                             eval_metric = 'mlogloss'
@@ -1031,6 +965,7 @@ def model_training_page(raw_data, summary_data):
                             num_class=st.session_state.num_classes if st.session_state.num_classes > 2 else None
                         )
                         
+                        # Training with progress
                         progress_bar = st.progress(0)
                         status_text = st.empty()
                         
@@ -1042,32 +977,31 @@ def model_training_page(raw_data, summary_data):
                             verbose=0
                         )
                         
+                        # Save model and components
                         joblib.dump(xgb_model, 'models/xgb_model.pkl')
                         joblib.dump(scaler_xgb, 'models/scaler_xgb.pkl')
                         joblib.dump(st.session_state.features_to_use, 'models/features_to_use.pkl')
                         st.session_state.xgb_model = xgb_model
                         st.session_state.scaler_xgb = scaler_xgb
                         
+                        # Display results
                         st.success("XGBoost model trained and saved successfully!")
                         progress_bar.empty()
                         status_text.empty()
                         
+                        # Feature importance
                         fig_plotly = px.bar(
                             x=st.session_state.features_to_use,
                             y=xgb_model.feature_importances_,
                             labels={'x': 'Features', 'y': 'Importance'},
                             title='Feature Importance',
                             color=xgb_model.feature_importances_,
-                            color_continuous_map=[COLOR_PALETTE['teal'], COLOR_PALETTE['coral_red'], COLOR_PALETTE['light_blue']]
+                            color_continuous_scale='RdYlGn'
                         )
-                        fig_plotly.update_layout(
-                            xaxis_tickangle=-45,
-                            paper_bgcolor=COLOR_PALETTE['teal'],
-                            plot_bgcolor=COLOR_PALETTE['teal'],
-                            font=dict(color=COLOR_PALETTE['light_blue'])
-                        )
+                        fig_plotly.update_layout(xaxis_tickangle=-45)
                         st.plotly_chart(fig_plotly, use_container_width=True)
                         
+                        # SHAP values
                         st.subheader("SHAP Feature Importance")
                         explainer = shap.TreeExplainer(xgb_model)
                         sample_idx = np.random.choice(X_test_xgb.shape[0], size=min(100, X_test_xgb.shape[0]), replace=False)
@@ -1080,12 +1014,6 @@ def model_training_page(raw_data, summary_data):
                             feature_names=st.session_state.features_to_use, 
                             show=False
                         )
-                        ax.set_facecolor(COLOR_PALETTE['teal'])
-                        fig_mpl.set_facecolor(COLOR_PALETTE['teal'])
-                        ax.tick_params(colors=COLOR_PALETTE['light_blue'])
-                        ax.title.set_color(COLOR_PALETTE['light_blue'])
-                        ax.xaxis.label.set_color(COLOR_PALETTE['light_blue'])
-                        ax.yaxis.label.set_color(COLOR_PALETTE['light_blue'])
                         st.pyplot(fig_mpl)
                         plt.close(fig_mpl)
                         
@@ -1094,19 +1022,21 @@ def model_training_page(raw_data, summary_data):
                         progress_bar.empty()
                         status_text.empty()
 
-# Prediction functions
+# Prediction functions with memory management
 def predict_with_cnn(data):
     """Make predictions with CNN model in batches"""
     try:
         if st.session_state.scaler_cnn is None:
             raise ValueError("CNN scaler not loaded.")
         
+        # Clear memory and prepare data
         tf.keras.backend.clear_session()
         gc.collect()
         
+        # Apply preprocessing steps
         processed_data = data.copy()
         flux_cols = [col for col in data.columns if col != 'LABEL']
-        norm_min, norm_max = -1.0, 1.0
+        norm_min, norm_max = -1.0, 1.0  # Default values
         outlier_threshold = 2.0
         
         if "Normalization" in st.session_state.preprocessing_options:
@@ -1135,6 +1065,7 @@ def predict_with_cnn(data):
         X_scaled = st.session_state.scaler_cnn.transform(X)
         X_reshaped = X_scaled.reshape(X_scaled.shape[0], X_scaled.shape[1], 1)
         
+        # Predict in batches
         batch_size = min(1000, len(X_reshaped))
         predictions = []
         for i in range(0, len(X_reshaped), batch_size):
@@ -1144,6 +1075,7 @@ def predict_with_cnn(data):
         
         predictions = (np.array(predictions) > 0.5).astype(int)
         
+        # Format results
         results = pd.DataFrame({
             'Star ID': processed_data.index,
             'Prediction': ['Exoplanet' if p == 1 else 'Non-Exoplanet' for p in predictions],
@@ -1162,10 +1094,12 @@ def predict_with_xgb(data):
         if st.session_state.scaler_xgb is None or st.session_state.label_encoder is None:
             raise ValueError("XGBoost scaler or label encoder not loaded.")
         
+        # Verify features exist
         missing_features = set(st.session_state.features_to_use) - set(data.columns)
         if missing_features:
             raise ValueError(f"Missing required features: {missing_features}")
             
+        # Apply preprocessing steps
         processed_data = data.copy()
         valid_cols = [col for col in st.session_state.features_to_use if col in processed_data.columns]
         norm_min, norm_max = -1.0, 1.0
@@ -1192,10 +1126,12 @@ def predict_with_xgb(data):
         X = X.fillna(X.mean(numeric_only=True))
         X_scaled = st.session_state.scaler_xgb.transform(X)
         
+        # Predict
         predictions = st.session_state.xgb_model.predict(X_scaled)
         prediction_probs = st.session_state.xgb_model.predict_proba(X_scaled)
         predictions = st.session_state.label_encoder.inverse_transform(predictions)
         
+        # Format results
         results = pd.DataFrame({
             'Star ID': processed_data.index,
             'Prediction': predictions,
@@ -1219,11 +1155,11 @@ def predictions_page():
     col1, col2 = st.columns(2)
     with col1:
         if model_choice == "CNN":
-            if st.button("🔄 Verify CNN Model"):
+            if st.button("🔄 Verify CNN Model", help="Check if CNN model is loaded properly"):
                 if load_cnn_model():
                     st.success("CNN model ready for predictions!")
         else:
-            if st.button("🔄 Verify XGBoost Model"):
+            if st.button("🔄 Verify XGBoost Model", help="Check if XGBoost model is loaded properly"):
                 if load_xgb_model():
                     st.success("XGBoost model ready for predictions!")
     
@@ -1243,7 +1179,7 @@ def predictions_page():
                         if results is not None:
                             st.subheader("Prediction Results")
                             st.dataframe(results.style.apply(
-                                lambda x: ['background-color: ' + COLOR_PALETTE['coral_red'] if val == 'Exoplanet' else 'background-color: ' + COLOR_PALETTE['teal'] for val in x],
+                                lambda x: ['background-color: #FF6B6B' if val == 'Exoplanet' else 'background-color: #4ECDC4' for val in x],
                                 subset=['Prediction']
                             ))
                             
@@ -1252,12 +1188,7 @@ def predictions_page():
                                 names='Prediction',
                                 title='Prediction Distribution',
                                 color='Prediction',
-                                color_discrete_map={'Exoplanet': COLOR_PALETTE['coral_red'], 'Non-Exoplanet': COLOR_PALETTE['teal']}
-                            )
-                            fig_plotly.update_layout(
-                                paper_bgcolor=COLOR_PALETTE['teal'],
-                                plot_bgcolor=COLOR_PALETTE['teal'],
-                                font=dict(color=COLOR_PALETTE['light_blue'])
+                                color_discrete_map={'Exoplanet': '#FF6B6B', 'Non-Exoplanet': '#4ECDC4'}
                             )
                             st.plotly_chart(fig_plotly, use_container_width=True)
             
@@ -1272,8 +1203,8 @@ def predictions_page():
                         if results is not None:
                             st.subheader("Prediction Results")
                             st.dataframe(results.style.apply(
-                                lambda x: ['background-color: ' + COLOR_PALETTE['coral_red'] if val == 'CONFIRMED' else 
-                                         ('background-color: ' + COLOR_PALETTE['light_blue'] if val == 'CANDIDATE' else 'background-color: ' + COLOR_PALETTE['teal']) for val in x],
+                                lambda x: ['background-color: #FF6B6B' if val == 'CONFIRMED' else 
+                                         ('background-color: #45B7D1' if val == 'CANDIDATE' else 'background-color: #4ECDC4') for val in x],
                                 subset=['Prediction']
                             ))
                             
@@ -1283,15 +1214,10 @@ def predictions_page():
                                 title='Prediction Distribution',
                                 color='Prediction',
                                 color_discrete_map={
-                                    'CONFIRMED': COLOR_PALETTE['coral_red'],
-                                    'CANDIDATE': COLOR_PALETTE['light_blue'],
-                                    'FALSE POSITIVE': COLOR_PALETTE['teal']
+                                    'CONFIRMED': '#FF6B6B',
+                                    'CANDIDATE': '#45B7D1',
+                                    'FALSE POSITIVE': '#4ECDC4'
                                 }
-                            )
-                            fig_plotly.update_layout(
-                                paper_bgcolor=COLOR_PALETTE['teal'],
-                                plot_bgcolor=COLOR_PALETTE['teal'],
-                                font=dict(color=COLOR_PALETTE['light_blue'])
                             )
                             st.plotly_chart(fig_plotly, use_container_width=True)
         
