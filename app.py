@@ -352,7 +352,7 @@ def prediction_analysis():
     if 'prediction_results' in st.session_state and st.session_state.prediction_results is not None:
         results = st.session_state.prediction_results
         
-        tab1, tab3 = st.tabs(["Confidence Analysis", "Error Analysis"])
+        tab1, tab2 = st.tabs(["Confidence Analysis", "Error Analysis"])
         
         with tab1:
             st.subheader("Prediction Confidence Distribution")
@@ -381,7 +381,7 @@ def prediction_analysis():
             except Exception as e:
                 st.warning(f"Failed to plot confidence distribution: {str(e)}")
         
-        with tab3:
+        with tab2:
             st.subheader("Misclassification Analysis")
             st.write("Examples of misclassified observations (placeholder):")
             st.dataframe(results.head().style.apply(
@@ -554,7 +554,7 @@ def model_training_page(raw_data, summary_data):
                     
                     try:
                         if raw_data is None or raw_data.empty:
-                            st.warning("No preprocessed raw data available for predictions.")
+                            st.warning("No raw data available for predictions.")
                         else:
                             st.markdown("---")
                             st.subheader("Sample Predictions")
@@ -711,7 +711,7 @@ def model_training_page(raw_data, summary_data):
                             labels={'x': 'Features', 'y': 'Importance'},
                             title='Feature Importance (Pre-Trained Model)',
                             color=st.session_state.xgb_model.feature_importances_,
-                            color_continuous_map=[COLOR_PALETTE['dark_slate'], COLOR_PALETTE['nebula_purple'], COLOR_PALETTE['starry_white']]
+                            color_continuous_scale=[COLOR_PALETTE['dark_slate'], COLOR_PALETTE['nebula_purple'], COLOR_PALETTE['starry_white']]
                         )
                         fig_plotly.update_layout(
                             xaxis_tickangle=-45,
@@ -812,7 +812,7 @@ def model_training_page(raw_data, summary_data):
                             labels={'x': 'Features', 'y': 'Importance'},
                             title='Feature Importance',
                             color=xgb_model.feature_importances_,
-                            color_continuous_map=[COLOR_PALETTE['dark_slate'], COLOR_PALETTE['nebula_purple'], COLOR_PALETTE['starry_white']]
+                            color_continuous_scale=[COLOR_PALETTE['dark_slate'], COLOR_PALETTE['nebula_purple'], COLOR_PALETTE['starry_white']]
                         )
                         fig_plotly.update_layout(
                             xaxis_tickangle=-45,
@@ -842,8 +842,7 @@ def predict_with_cnn(data):
         
         X = processed_data.drop(columns=['LABEL'] if 'LABEL' in processed_data.columns else [], errors='ignore').values
         X_scaled = st.session_state.scaler_cnn.transform(X)
-        X_reshaped = X_scaled.reshape(X_scaled.shape[0], X_scaled.shape[1], 1)
-        
+        X_reshaped = X_scaled.reshape(X_scaled.shape[0averaged
         batch_size = min(1000, len(X_reshaped))
         predictions = []
         for i in range(0, len(X_reshaped), batch_size):
