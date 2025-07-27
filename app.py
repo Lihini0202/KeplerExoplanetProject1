@@ -5,7 +5,7 @@ import tensorflow as tf
 from tensorflow.keras.models import load_model, Model
 from tensorflow.keras.layers import Input, Conv1D, MaxPooling1D, GlobalAveragePooling1D, Dense, Dropout, BatchNormalization
 from tensorflow.keras.regularizers import l2
-from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau  
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.model_selection import train_test_split
 from sklearn.utils.class_weight import compute_class_weight
@@ -31,7 +31,7 @@ st.markdown("""
         background-color: #f0f2f6 !important;
     }
     .main {
-        background-color: black !important;
+        background-color: #f0f2f6 !important;
     }
     .stButton>button {
         background-color: #4CAF50 !important;
@@ -60,7 +60,7 @@ if 'features_to_use' not in st.session_state:
     st.session_state.features_to_use = None
 
 # Focal Loss Function for CNN
-def focal_loss(gamma=1.0, alpha=0.75):
+def focal_loss(gamma=2.0, alpha=0.5):  # Adjusted gamma and alpha
     def focal_loss_fixed(y_true, y_pred):
         y_true = tf.cast(y_true, tf.float32)
         y_pred = tf.clip_by_value(y_pred, tf.keras.backend.epsilon(), 1.0 - tf.keras.backend.epsilon())
@@ -110,7 +110,7 @@ if page == "Data Exploration":
             plt.ylabel("Flux")
             plt.legend()
             st.pyplot(plt)
-            plt.close()  # Added to clear figure
+            plt.close()
     else:
         st.write("Summary data for XGBoost model")
         st.write(summary_data.head())
@@ -123,7 +123,7 @@ if page == "Data Exploration":
             plt.xlabel(feature)
             plt.ylabel("Count")
             st.pyplot(plt)
-            plt.close()  # Added to clear figure
+            plt.close()
 
 elif page == "Model Training":
     st.title("Model Training")
@@ -134,72 +134,72 @@ elif page == "Model Training":
         st.subheader("CNN Model")
         if st.button("Load Pre-Trained CNN Model"):
             try:
-                st.session_state.cnn_model = load_model('models/cnn_exoplanet_model.keras', custom_objects={'focal_loss_fixed': focal_loss(gamma=1.0, alpha=0.75)})
+                st.session_state.cnn_model = load_model('models/cnn_exoplanet_model.keras', custom_objects={'focal_loss_fixed': focal_loss(gamma=2.0, alpha=0.5)})
                 st.session_state.scaler_cnn = joblib.load('models/scaler_cnn.pkl')
                 st.success("Pre-trained CNN model and scaler loaded successfully!")
             except (FileNotFoundError, EOFError, pickle.PicklingError, pickle.UnpicklingError, AttributeError, ValueError) as e:
                 st.error(f"Error loading CNN model or scaler: {e}")
         
         if st.button("Train CNN Model"):
-            X_cnn = raw_data.drop(columns=['LABEL']).values
-            y_cnn = raw_data['LABEL'].values - 1
-            scaler_cnn = StandardScaler()
-            X_cnn_scaled = scaler_cnn.fit_transform(X_cnn)
-            X_cnn = X_cnn_scaled.reshape(X_cnn_scaled.shape[0], X_cnn_scaled.shape[1], 1)
-            
-            confirmed_indices = np.where(y_cnn == 1)[0]
-            X_confirmed = X_cnn[confirmed_indices]
-            y_confirmed = y_cnn[confirmed_indices]
-            oversample_factor = 15
-            X_train_oversampled = np.vstack([X_cnn] + [X_confirmed] * oversample_factor)
-            y_train_oversampled = np.hstack([y_cnn] + [y_confirmed] * oversample_factor)
-            
-            class_weights = compute_class_weight('balanced', classes=np.unique(y_train_oversampled), y=y_train_oversampled)
-            class_weight_dict = {i: class_weights[i] for i in range(len(class_weights))}
-            
-            inputs = Input(shape=(X_cnn.shape[1], 1))
-            x = Conv1D(16, kernel_size=7, activation='relu', kernel_regularizer=l2(0.01))(inputs)
-            x = BatchNormalization()(x)
-            x = MaxPooling1D(pool_size=4)(x)
-            x = Conv1D(32, kernel_size=7, activation='relu', kernel_regularizer=l2(0.01))(x)
-            x = BatchNormalization()(x)
-            x = MaxPooling1D(pool_size=4)(x)
-            x = Conv1D(64, kernel_size=7, activation='relu', kernel_regularizer=l2(0.01))(x)
-            x = BatchNormalization()(x)
-            x = MaxPooling1D(pool_size=4)(x)
-            x = GlobalAveragePooling1D()(x)
-            x = Dense(64, activation='relu', kernel_regularizer=l2(0.01))(x)
-            x = Dropout(0.3)(x)
-            outputs = Dense(1, activation='sigmoid')(x)
-            model = Model(inputs, outputs)
-            
-            model.compile(optimizer='adam', loss=focal_loss(gamma=1.0, alpha=0.75), metrics=['accuracy'])
-            early_stopping = EarlyStopping(monitor='val_loss', patience=20, restore_best_weights=True)
-            lr_scheduler = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min_lr=1e-6)
-            
-            history = model.fit(
-                X_train_oversampled, y_train_oversampled,
-                validation_split=0.2,
-                epochs=30, batch_size=64,
-                callbacks=[early_stopping, lr_scheduler],
-                class_weight=class_weight_dict,
-                verbose=1
-            )
-            
-            model.save('models/cnn_exoplanet_model.keras')
-            joblib.dump(scaler_cnn, 'models/scaler_cnn.pkl')
-            st.session_state.cnn_model = model
-            st.session_state.scaler_cnn = scaler_cnn
-            st.success("CNN model trained and saved successfully!")
-            
-            plt.figure(figsize=(10, 4))
-            plt.plot(history.history['loss'], label='Training Loss')
-            plt.plot(history.history['val_loss'], label='Validation Loss')
-            plt.xlabel('Epoch')
-            plt.ylabel('Loss')
-            plt.legend()
-            st.pyplot(plt)
-            plt.close()  # Added to clear figure
+            try:
+                X_cnn = raw_data.drop(columns=['LABEL']).values
+                y_cnn = raw_data['LABEL'].values - 1
+                scaler_cnn = StandardScaler()
+                X_cnn_scaled = scaler_cnn.fit_transform(X_cnn)
+                X_cnn = X_cnn_scaled.reshape(X_cnn_scaled.shape[0], X_cnn_scaled.shape[1], 1)
+                
+                confirmed_indices = np.where(y_cnn == 1)[0]
+                X_confirmed = X_cnn[confirmed_indices]
+                y_confirmed = y_cnn[confirmed_indices]
+                oversample_factor = 10  # Reduced from 15
+                X_train_oversampled = np.vstack([X_cnn] + [X_confirmed] * oversample_factor)
+                y_train_oversampled = np.hstack([y_cnn] + [y_confirmed] * oversample_factor)
+                
+                class_weights = compute_class_weight('balanced', classes=np.unique(y_train_oversampled), y=y_train_oversampled)
+                class_weight_dict = {i: class_weights[i] for i in range(len(class_weights))}
+                
+                inputs = Input(shape=(X_cnn.shape[1], 1))
+                x = Conv1D(8, kernel_size=7, activation='relu', kernel_regularizer=l2(0.02))(inputs)  # Simplified
+                x = BatchNormalization()(x)
+                x = MaxPooling1D(pool_size=4)(x)
+                x = Conv1D(16, kernel_size=7, activation='relu', kernel_regularizer=l2(0.02))(x)
+                x = BatchNormalization()(x)
+                x = MaxPooling1D(pool_size=4)(x)
+                x = GlobalAveragePooling1D()(x)
+                x = Dense(32, activation='relu', kernel_regularizer=l2(0.02))(x)
+                x = Dropout(0.3)(x)
+                outputs = Dense(1, activation='sigmoid')(x)
+                model = Model(inputs, outputs)
+                
+                model.compile(optimizer='adam', loss=focal_loss(gamma=2.0, alpha=0.5), metrics=['accuracy'])
+                early_stopping = EarlyStopping(monitor='val_loss', patience=20, restore_best_weights=True)
+                lr_scheduler = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min_lr=1e-6)
+                
+                history = model.fit(
+                    X_train_oversampled, y_train_oversampled,
+                    validation_split=0.2,
+                    epochs=30, batch_size=128,  # Increased from 64
+                    callbacks=[early_stopping, lr_scheduler],
+                    class_weight=class_weight_dict,
+                    verbose=1
+                )
+                
+                model.save('models/cnn_exoplanet_model.keras')
+                joblib.dump(scaler_cnn, 'models/scaler_cnn.pkl')
+                st.session_state.cnn_model = model
+                st.session_state.scaler_cnn = scaler_cnn
+                st.success("CNN model trained and saved successfully!")
+                
+                plt.figure(figsize=(10, 4))
+                plt.plot(history.history['loss'], label='Training Loss')
+                plt.plot(history.history['val_loss'], label='Validation Loss')
+                plt.xlabel('Epoch')
+                plt.ylabel('Loss')
+                plt.legend()
+                st.pyplot(plt)
+                plt.close()
+            except Exception as e:
+                st.error(f"Training failed: {str(e)}")
     
     else:
         st.subheader("XGBoost Model")
@@ -256,7 +256,7 @@ elif page == "Model Training":
             plt.figure(figsize=(10, 4))
             shap.summary_plot(shap_values, X_test_xgb, feature_names=st.session_state.features_to_use, show=False)
             st.pyplot(plt)
-            plt.close()  # Added to clear figure
+            plt.close()
 
 elif page == "Predictions":
     st.title("Exoplanet Predictions")
