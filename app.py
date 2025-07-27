@@ -1,28 +1,10 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
-import tensorflow as tf
-from tensorflow.keras.models import load_model, Model
-from tensorflow.keras.layers import Input, Conv1D, MaxPooling1D, GlobalAveragePooling1D, Dense, Dropout, BatchNormalization
-from tensorflow.keras.regularizers import l2
-from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
-from sklearn.preprocessing import StandardScaler, LabelEncoder, MinMaxScaler
-from sklearn.model_selection import train_test_split
-from sklearn.utils.class_weight import compute_class_weight
-from sklearn.utils import resample
-import xgboost as xgb
-import joblib
 import matplotlib.pyplot as plt
-import seaborn as sns
-import os
-import gc
-from tabulate import tabulate
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from scipy import signal
-from streamlit_extras.metric_cards import style_metric_cards
-import matplotlib as mpl
+import os
 
 # Define the space-themed color palette
 COLOR_PALETTE = {
@@ -30,9 +12,6 @@ COLOR_PALETTE = {
     'starry_white': '#F4F4F9',  # Light gray-white for text
     'nebula_purple': '#5E4B8C'  # Vibrant purple for accents
 }
-
-# Set Matplotlib color cycle
-mpl.rcParams['axes.prop_cycle'] = mpl.cycler(color=[COLOR_PALETTE['nebula_purple']])
 
 # Initialize session state
 def initialize_session_state():
@@ -57,16 +36,6 @@ def initialize_session_state():
         if var not in st.session_state:
             st.session_state[var] = default
 
-# Clear memory
-def clear_memory():
-    """Clear TensorFlow session and free memory"""
-    tf.keras.backend.clear_session()
-    gc.collect()
-    if 'cnn_model' in st.session_state:
-        del st.session_state.cnn_model
-    if 'xgb_model' in st.session_state:
-        del st.session_state.xgb_model
-
 # Custom CSS for space-themed styling
 def setup_page_config():
     """Configure page settings and styles with space-themed palette"""
@@ -79,9 +48,6 @@ def setup_page_config():
     
     st.markdown(f"""
         <style>
-        :root {{
-            background-color: {COLOR_PALETTE['dark_slate']} !important;
-        }}
         .main {{
             background-color: {COLOR_PALETTE['dark_slate']} !important;
             color: {COLOR_PALETTE['starry_white']} !important;
@@ -89,9 +55,6 @@ def setup_page_config():
         .stSidebar {{
             background-color: {COLOR_PALETTE['dark_slate']} !important;
             color: {COLOR_PALETTE['starry_white']} !important;
-        }}
-        .stSidebar [data-testid="stSidebarNav"] {{
-            background-color: {COLOR_PALETTE['dark_slate']} !important;
         }}
         .stTabs [data-baseweb="tab-list"] {{
             gap: 10px;
@@ -108,9 +71,6 @@ def setup_page_config():
         .stTabs [aria-selected="true"] {{
             background-color: {COLOR_PALETTE['starry_white']} !important;
             color: {COLOR_PALETTE['dark_slate']} !important;
-        }}
-        .stTabs [data-baseweb="tab-highlight"] {{
-            background-color: {COLOR_PALETTE['nebula_purple']} !important;
         }}
         .stButton>button {{
             border-radius: 8px;
@@ -142,28 +102,11 @@ def setup_page_config():
             border-radius: 8px;
             padding: 15px;
         }}
-        .stTextInput input, .stTextArea textarea, .stSelectbox, .stSlider div {{
-            background-color: {COLOR_PALETTE['dark_slate']} !important;
-            color: {COLOR_PALETTE['starry_white']} !important;
-            border-color: {COLOR_PALETTE['nebula_purple']} !important;
-        }}
         h1, h2, h3, h4, h5, h6, p, div, span {{
             color: {COLOR_PALETTE['starry_white']} !important;
         }}
         </style>
     """, unsafe_allow_html=True)
-
-# Focal Loss Function for CNN
-def focal_loss(gamma=2.0, alpha=0.5):
-    def focal_loss_fixed(y_true, y_pred):
-        y_true = tf.cast(y_true, tf.float32)
-        y_pred = tf.clip_by_value(y_pred, tf.keras.backend.epsilon(), 1.0 - tf.keras.backend.epsilon())
-        bce = -y_true * tf.math.log(y_pred) - (1.0 - y_true) * tf.math.log(1.0 - y_pred)
-        p_t = y_true * y_pred + (1.0 - y_true) * (1.0 - y_pred)
-        focal_factor = tf.pow(1.0 - p_t, gamma)
-        alpha_t = y_true * alpha + (1.0 - y_true) * (1.0 - alpha)
-        return tf.reduce_mean(alpha_t * focal_factor * bce)
-    return focal_loss_fixed
 
 # Load datasets
 @st.cache_data(show_spinner="Loading datasets...")
@@ -234,61 +177,37 @@ def plot_light_curves(data, n_samples=5):
         st.error(f"Error generating light curves: {e}")
         return None
 
-# Model loading functions
-def load_cnn_model():
-    """Safely load CNN model with memory cleanup"""
-    try:
-        clear_memory()
-        if os.path.exists('models/cnn_exoplanet_model.keras'):
-            st.session_state.cnn_model = load_model(
-                'models/cnn_exoplanet_model.keras', 
-                custom_objects={'focal_loss_fixed': focal_loss(gamma=2.0, alpha=0.5)}
-            )
-        if os.path.exists('models/scaler_cnn.pkl'):
-            st.session_state.scaler_cnn = joblib.load('models/scaler_cnn.pkl')
-        
-        if st.session_state.cnn_model and st.session_state.scaler_cnn:
-            st.success("CNN model and scaler loaded successfully!")
-            st.session_state.models_loaded = (
-                st.session_state.cnn_model is not None and 
-                st.session_state.xgb_model is not None
-            )
-            return True
-        else:
-            st.error("CNN model files not found or incomplete")
-            return False
-    except Exception as e:
-        st.error(f"Error loading CNN model: {e}")
-        return False
+# Placeholder implementations for missing functions
+def data_exploration_page(raw_data, summary_data):
+    """Placeholder for Data Exploration page"""
+    st.title("Data Exploration")
+    st.write("This page will display data exploration features once implemented.")
+    if raw_data is not None:
+        st.write("Raw Data Sample:")
+        st.dataframe(raw_data.head())
+    if summary_data is not None:
+        st.write("Summary Data Sample:")
+        st.dataframe(summary_data.head())
 
-def load_xgb_model():
-    """Safely load XGBoost model with components"""
-    try:
-        clear_memory()
-        if os.path.exists('models/xgb_model.pkl'):
-            st.session_state.xgb_model = joblib.load('models/xgb_model.pkl')
-        if os.path.exists('models/scaler_xgb.pkl'):
-            st.session_state.scaler_xgb = joblib.load('models/scaler_xgb.pkl')
-        if os.path.exists('models/label_encoder.pkl'):
-            st.session_state.label_encoder = joblib.load('models/label_encoder.pkl')
-        if os.path.exists('models/features_to_use.pkl'):
-            st.session_state.features_to_use = joblib.load('models/features_to_use.pkl')
-        
-        if (st.session_state.xgb_model and st.session_state.scaler_xgb and 
-            st.session_state.label_encoder and st.session_state.features_to_use):
-            st.session_state.num_classes = len(st.session_state.label_encoder.classes_)
-            st.success("XGBoost model and components loaded successfully!")
-            st.session_state.models_loaded = (
-                st.session_state.cnn_model is not None and 
-                st.session_state.xgb_model is not None
-            )
-            return True
-        else:
-            st.error("XGBoost model files not found or incomplete")
-            return False
-    except Exception as e:
-        st.error(f"Error loading XGBoost model: {e}")
-        return False
+def model_training_page(raw_data, summary_data):
+    """Placeholder for Model Training page"""
+    st.title("Model Training")
+    st.write("This page will allow training of CNN and XGBoost models once implemented.")
+
+def predictions_page():
+    """Placeholder for Predictions page"""
+    st.title("Predictions")
+    st.write("This page will handle predictions once implemented.")
+
+def prediction_analysis():
+    """Placeholder for Prediction Analysis page"""
+    st.title("Prediction Analysis")
+    st.write("This page will display prediction analysis once implemented.")
+
+def user_feedback():
+    """Placeholder for User Feedback page"""
+    st.title("Feedback")
+    st.write("This page will collect user feedback once implemented.")
 
 def landing_page():
     """Render the landing page with enhanced design"""
@@ -324,9 +243,9 @@ def landing_page():
     # Feature Cards
     cols = st.columns(3)
     with cols[0]:
-        with st.container(border=True, height=300):
+        with st.container():  # Removed border parameter
             st.markdown(f"""
-            <div style="text-align: center;">
+            <div style="text-align: center; border: 1px solid {COLOR_PALETTE['nebula_purple']}; padding: 20px; border-radius: 8px;">
             <h3 style="color: {COLOR_PALETTE['nebula_purple']};">🔭 Data Exploration</h3>
             <p>Visualize light curves and analyze dataset statistics to understand the characteristics of exoplanet systems</p>
             </div>
@@ -334,9 +253,9 @@ def landing_page():
             st.image("https://via.placeholder.com/300x150?text=Light+Curves", use_column_width=True)
     
     with cols[1]:
-        with st.container(border=True, height=300):
+        with st.container():  # Removed border parameter
             st.markdown(f"""
-            <div style="text-align: center;">
+            <div style="text-align: center; border: 1px solid {COLOR_PALETTE['nebula_purple']}; padding: 20px; border-radius: 8px;">
             <h3 style="color: {COLOR_PALETTE['nebula_purple']};">🤖 Model Training</h3>
             <p>Build and train CNN and XGBoost models to classify exoplanet transits from stellar light curves</p>
             </div>
@@ -344,9 +263,9 @@ def landing_page():
             st.image("https://via.placeholder.com/300x150?text=Model+Training", use_column_width=True)
     
     with cols[2]:
-        with st.container(border=True, height=300):
+        with st.container():  # Removed border parameter
             st.markdown(f"""
-            <div style="text-align: center;">
+            <div style="text-align: center; border: 1px solid {COLOR_PALETTE['nebula_purple']}; padding: 20px; border-radius: 8px;">
             <h3 style="color: {COLOR_PALETTE['nebula_purple']};">🔮 Predictions</h3>
             <p>Upload new observations and classify them as exoplanet or non-exoplanet systems</p>
             </div>
@@ -355,14 +274,13 @@ def landing_page():
     
     # Pro Tip Section
     st.markdown("---")
-    with st.container(border=True):
-        st.markdown(f"""
-        <div style="color: {COLOR_PALETTE['starry_white']};">
-        <h3 style="color: {COLOR_PALETTE['nebula_purple']};">💡 Pro Tip</h3>
-        <p style="font-size: 1.1rem;"><b>Start with the Data Exploration tab</b> to understand the dataset characteristics before training models or making predictions.</p>
-        <p>Explore the light curve visualizations to see how exoplanet transits appear in the data.</p>
-        </div>
-        """, unsafe_allow_html=True)
+    st.markdown(f"""
+    <div style="color: {COLOR_PALETTE['starry_white']}; border: 1px solid {COLOR_PALETTE['nebula_purple']}; padding: 20px; border-radius: 8px;">
+    <h3 style="color: {COLOR_PALETTE['nebula_purple']};">💡 Pro Tip</h3>
+    <p style="font-size: 1.1rem;"><b>Start with the Data Exploration tab</b> to understand the dataset characteristics before training models or making predictions.</p>
+    <p>Explore the light curve visualizations to see how exoplanet transits appear in the data.</p>
+    </div>
+    """, unsafe_allow_html=True)
     
     # Sample Visualization
     if st.session_state.preprocessed_raw_data is not None:
@@ -383,35 +301,44 @@ def model_comparison_interface():
     st.title("🆚 Model Comparison")
     st.markdown("---")
     
-    # Model status section with direct loading
-    st.subheader("Model Status", divider="purple")
+    # Model status section
+    st.subheader("Model Status")  # Removed divider parameter
+    st.markdown("---")  # Added manual divider
     col1, col2 = st.columns(2)
     
     with col1:
-        cnn_card = st.container(border=True)
-        cnn_card.markdown("##### Convolutional Neural Network")
-        if st.session_state.get('cnn_model'):
-            cnn_card.success("✅ Model Loaded")
-            cnn_card.metric("Parameters", f"{st.session_state.cnn_model.count_params():,}")
-            cnn_card.metric("Input Shape", "3197 × 1")  # Update with your actual input shape
-        else:
-            cnn_card.warning("❌ Model Not Loaded")
-            if cnn_card.button("Load CNN Model", key="load_cnn_compare"):
-                if load_cnn_model():
-                    st.rerun()
+        with st.container():  # Removed border parameter
+            st.markdown(f"""
+            <div style="border: 1px solid {COLOR_PALETTE['nebula_purple']}; padding: 15px; border-radius: 8px;">
+            <h5 style="color: {COLOR_PALETTE['starry_white']};">Convolutional Neural Network</h5>
+            </div>
+            """, unsafe_allow_html=True)
+            if st.session_state.get('cnn_model'):
+                st.success("✅ Model Loaded")
+                st.metric("Parameters", f"{st.session_state.cnn_model.count_params():,}")
+                st.metric("Input Shape", "3197 × 1")
+            else:
+                st.warning("❌ Model Not Loaded")
+                if st.button("Load CNN Model", key="load_cnn_compare"):
+                    # Placeholder for load_cnn_model
+                    st.info("CNN model loading not implemented yet.")
     
     with col2:
-        xgb_card = st.container(border=True)
-        xgb_card.markdown("##### XGBoost Classifier")
-        if st.session_state.get('xgb_model'):
-            xgb_card.success("✅ Model Loaded")
-            xgb_card.metric("Trees", st.session_state.xgb_model.n_estimators)
-            xgb_card.metric("Features", len(st.session_state.features_to_use))
-        else:
-            xgb_card.warning("❌ Model Not Loaded")
-            if xgb_card.button("Load XGBoost Model", key="load_xgb_compare"):
-                if load_xgb_model():
-                    st.rerun()
+        with st.container():  # Removed border parameter
+            st.markdown(f"""
+            <div style="border: 1px solid {COLOR_PALETTE['nebula_purple']}; padding: 15px; border-radius: 8px;">
+            <h5 style="color: {COLOR_PALETTE['starry_white']};">XGBoost Classifier</h5>
+            </div>
+            """, unsafe_allow_html=True)
+            if st.session_state.get('xgb_model'):
+                st.success("✅ Model Loaded")
+                st.metric("Trees", st.session_state.xgb_model.n_estimators)
+                st.metric("Features", len(st.session_state.features_to_use))
+            else:
+                st.warning("❌ Model Not Loaded")
+                if st.button("Load XGBoost Model", key="load_xgb_compare"):
+                    # Placeholder for load_xgb_model
+                    st.info("XGBoost model loading not implemented yet.")
     
     st.markdown("---")
     
@@ -421,16 +348,15 @@ def model_comparison_interface():
         return
     
     # Performance metrics comparison
-    st.subheader("Performance Metrics", divider="purple")
+    st.subheader("Performance Metrics")
+    st.markdown("---")
     
-    # Using actual metrics if available, otherwise mock data
     performance_data = {
         'Metric': ['Accuracy', 'Precision', 'Recall', 'F1 Score', 'Inference Time'],
         'CNN': [0.92, 0.89, 0.85, 0.87, '15ms'],
         'XGBoost': [0.88, 0.91, 0.82, 0.86, '5ms']
     }
     
-    # Display metrics in tabs
     tab1, tab2 = st.tabs(["Table View", "Visual Comparison"])
     
     with tab1:
@@ -461,7 +387,8 @@ def model_comparison_interface():
         st.plotly_chart(fig, use_container_width=True)
     
     # Model characteristics comparison
-    st.subheader("Model Characteristics", divider="purple")
+    st.subheader("Model Characteristics")
+    st.markdown("---")
     
     char_data = {
         'Characteristic': ['Input Type', 'Training Time', 'Best For', 'Interpretability'],
@@ -486,7 +413,8 @@ def model_comparison_interface():
     )
     
     # Recommendation section
-    st.subheader("Recommendation", divider="purple")
+    st.subheader("Recommendation")
+    st.markdown("---")
     
     with st.expander("Which model should I use?"):
         st.markdown("""
@@ -502,9 +430,6 @@ def model_comparison_interface():
         - Interpretability is important
         - You're working with limited resources
         """)
-
-# (Rest of your existing functions remain unchanged: prediction_analysis, user_feedback, 
-# data_exploration_page, model_training_page, predict_with_cnn, predict_with_xgb)
 
 def main():
     """Main application function"""
