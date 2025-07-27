@@ -13,6 +13,7 @@ import shap
 import pickle
 import os
 from tabulate import tabulate
+from sklearn.utils.class_weight import compute_class_weight
 
 # Custom CSS for styling
 st.markdown("""
