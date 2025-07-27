@@ -1,3 +1,10 @@
+# Mount Google Drive
+from google.colab import drive
+drive.mount('/content/drive')
+
+# Save train_models.py to a temporary file
+with open('/content/train_models.py', 'w') as f:
+    f.write('''
 import pandas as pd
 import numpy as np
 import tensorflow as tf
@@ -8,10 +15,20 @@ from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 from tensorflow.keras import backend as K
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.utils.class_weight import compute_class_weight
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import train_test_split
 import xgboost as xgb
 import joblib
+import sklearn
+import sys
 import os
+
+# Print versions for debugging
+print(f"Python version: {sys.version}")
+print(f"scikit-learn version: {sklearn.__version__}")
+print(f"numpy version: {np.__version__}")
+print(f"tensorflow version: {tf.__version__}")
+print(f"xgboost version: {xgb.__version__}")
+print(f"joblib version: {joblib.__version__}")
 
 # Focal Loss Function
 def focal_loss(gamma=1.0, alpha=0.75):
@@ -36,7 +53,7 @@ def augment_data(X, y, sigma=0.04, max_shift=200):
     return X_aug, y
 
 # Create models directory
-os.makedirs("models", exist_ok=True)
+os.makedirs("/content/drive/MyDrive/Keler/models", exist_ok=True)
 
 # Load data
 try:
@@ -100,43 +117,59 @@ history = model.fit(
 )
 
 # Save CNN model and scaler
-model.save('models/cnn_exoplanet_model.keras')
-joblib.dump(scaler_cnn, 'models/scaler_cnn.pkl')
-print("✅ Saved CNN model to 'models/cnn_exoplanet_model.keras' and scaler to 'models/scaler_cnn.pkl'")
+model.save('/content/drive/MyDrive/Keler/models/cnn_exoplanet_model.keras')
+joblib.dump(scaler_cnn, '/content/drive/MyDrive/Keler/models/scaler_cnn.pkl')
+print("✅ Saved CNN model to '/content/drive/MyDrive/Keler/models/cnn_exoplanet_model.keras' and scaler to '/content/drive/MyDrive/Keler/models/scaler_cnn.pkl'")
 
 # XGBoost Training
 print("Training XGBoost model...")
-# Define features_to_use based on your notebook
-# Select only numeric columns for XGBoost
-numeric_cols = baseline_df.select_dtypes(include=np.number).columns.tolist()
-features_to_use_xgb = [col for col in numeric_cols if col not in ['kepid', 'label_encoded']]
+# Select numeric columns only
+numeric_columns = baseline_df.select_dtypes(include=[np.number]).columns
+exclude_columns = ['kepid', 'koi_disposition', 'label_encoded']
+features_to_use = [col for col in numeric_columns if col not in exclude_columns]
+if not features_to_use:
+    print("ERROR: No numeric features found in baseline_df.")
+    exit(1)
 
+# Filter out problematic columns
+X_xgb = baseline_df[features_to_use]
+# Drop columns with all NaN or infinite values
+X_xgb = X_xgb.dropna(axis=1, how='all')
+X_xgb = X_xgb.replace([np.inf, -np.inf], np.nan)
+# Drop columns with zero variance
+variances = X_xgb.var(numeric_only=True)
+features_to_use = [col for col in X_xgb.columns if variances[col] > 0]
+X_xgb = X_xgb[features_to_use]
+# Fill remaining NaNs with mean
+X_xgb = X_xgb.fillna(X_xgb.mean(numeric_only=True))
+
+# Label encoding
 if 'label_encoded' not in baseline_df.columns:
     label_encoder = LabelEncoder()
     baseline_df['label_encoded'] = label_encoder.fit_transform(baseline_df['koi_disposition'])
-    joblib.dump(label_encoder, 'models/label_encoder.pkl')
+    joblib.dump(label_encoder, '/content/drive/MyDrive/Keler/models/label_encoder.pkl')
 
-X_xgb = baseline_df[features_to_use_xgb]
 y_xgb = baseline_df['label_encoded']
-
-# Handle missing values (if any, as per your notebook) - applied only to numeric features
-X_xgb = X_xgb.fillna(X_xgb.mean())
 
 # Standardize features
 scaler_xgb = StandardScaler()
 X_xgb_scaled = scaler_xgb.fit_transform(X_xgb)
 
 # Train-test split
-from sklearn.model_selection import train_test_split
 X_train_xgb, _, y_train_xgb, _ = train_test_split(X_xgb_scaled, y_xgb, test_size=0.3, stratify=y_xgb, random_state=42)
 
 # Train XGBoost
 xgb_model = xgb.XGBClassifier(
-    objective='binary:logistic', eval_metric='logloss', use_label_encoder=False, random_state=42
+    objective='binary:logistic', eval_metric='logloss', random_state=42
 )
 xgb_model.fit(X_train_xgb, y_train_xgb)
 
-# Save XGBoost model and scaler
-joblib.dump(xgb_model, 'models/xgb_model.pkl')
-joblib.dump(scaler_xgb, 'models/scaler_xgb.pkl')
-print("✅ Saved XGBoost model to 'models/xgb_model.pkl' and scaler to 'models/scaler_xgb.pkl'")
+# Save XGBoost model, scaler, and features
+joblib.dump(xgb_model, '/content/drive/MyDrive/Keler/models/xgb_model.pkl')
+joblib.dump(scaler_xgb, '/content/drive/MyDrive/Keler/models/scaler_xgb.pkl')
+joblib.dump(features_to_use, '/content/drive/MyDrive/Keler/models/features_to_use.pkl')
+print("✅ Saved XGBoost model to '/content/drive/MyDrive/Keler/models/xgb_model.pkl', scaler to '/content/drive/MyDrive/Keler/models/scaler_xgb.pkl', and features to '/content/drive/MyDrive/Keler/models/features_to_use.pkl'")
+''')
+
+# Run the script
+%run /content/train_models.py
