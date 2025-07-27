@@ -67,7 +67,7 @@ def setup_page_config():
             background-color: #f0f2f6 !important;
         }
         .main {
-            background-color: white !important;
+            background-color: black !important;
         }
         .stTabs [data-baseweb="tab-list"] {
             gap: 10px;
