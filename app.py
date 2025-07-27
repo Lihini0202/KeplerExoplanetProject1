@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -300,7 +301,7 @@ def landing_page():
 
 # Model Comparison Interface
 def model_comparison_interface():
-    """Render the model comparison interface"""
+    """Render the model精力充沛的 model comparison interface"""
     st.header("📊 Model Performance Comparison")
     
     if st.session_state.cnn_model and st.session_state.xgb_model:
@@ -842,7 +843,8 @@ def predict_with_cnn(data):
         
         X = processed_data.drop(columns=['LABEL'] if 'LABEL' in processed_data.columns else [], errors='ignore').values
         X_scaled = st.session_state.scaler_cnn.transform(X)
-        X_reshaped = X_scaled.reshape(X_scaled.shape[0averaged
+        X_reshaped = X_scaled.reshape(X_scaled.shape[0], X_scaled.shape[1], 1)
+        
         batch_size = min(1000, len(X_reshaped))
         predictions = []
         for i in range(0, len(X_reshaped), batch_size):
