@@ -190,7 +190,8 @@ def plot_light_curves(data, n_samples=5):
         
         fig.update_xaxes(title_text="Time", row=1, col=1)
         fig.update_xaxes(title_text="Time", row=1, col=2)
-        fig.update_yaxes(title_text="Flux", row=1, col”等
+        fig.update_yaxes(title_text="Flux", row=1, col=2)  # Fixed line with straight quotes
+        
         return fig
     except Exception as e:
         st.error(f"Error generating light curves: {e}")
