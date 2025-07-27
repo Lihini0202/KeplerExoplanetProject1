@@ -1,8 +1,9 @@
+pip uninstall numpy
+pip install numpy==1.24.4
 rich>=10.11.0,<14
 streamlit==1.24.1
 tensorflow>=2.13
 pandas==2.0.3
-numpy==1.23.5  # or try 1.24.4
 scikit-learn==1.2.2
 matplotlib==3.7.1
 seaborn==0.12.2
