@@ -6,23 +6,19 @@ from tensorflow.keras.models import load_model, Model
 from tensorflow.keras.layers import Input, Conv1D, MaxPooling1D, GlobalAveragePooling1D, Dense, Dropout, BatchNormalization
 from tensorflow.keras.regularizers import l2
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
-from sklearn.preprocessing import StandardScaler, LabelEncoder, MinMaxScaler
+from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.model_selection import train_test_split
 from sklearn.utils.class_weight import compute_class_weight
-from sklearn.utils import resample
 import xgboost as xgb
 import joblib
 import matplotlib.pyplot as plt
 import seaborn as sns
-import shap
 import os
 import gc
 from tabulate import tabulate
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from scipy import signal
-from streamlit_extras.metric_cards import style_metric_cards
 import matplotlib as mpl
 
 # Define the space-themed color palette
@@ -49,10 +45,7 @@ def initialize_session_state():
         'num_classes': None,
         'prediction_results': None,
         'cnn_config': {'conv_layers': 2, 'filters': [8, 16], 'kernel_size': 5, 'dense_units': 32, 'dropout_rate': 0.3, 'learning_rate': 1e-3},
-        'xgb_config': {'n_estimators': 100, 'max_depth': 5, 'learning_rate': 0.1, 'subsample': 0.8},
-        'preprocessing_options': ['Standardization'],
-        'preprocessed_raw_data': None,
-        'preprocessed_summary_data': None
+        'xgb_config': {'n_estimators': 100, 'max_depth': 5, 'learning_rate': 0.1, 'subsample': 0.8}
     }
     for var, default in session_vars.items():
         if var not in st.session_state:
@@ -174,8 +167,6 @@ def load_data():
         raw_data = pd.read_csv("datasets/exoTrain.csv")
         summary_data = pd.read_csv("datasets/cumulative.csv")
         st.session_state.data_loaded = True
-        st.session_state.preprocessed_raw_data = raw_data.copy()
-        st.session_state.preprocessed_summary_data = summary_data.copy()
         return None, raw_data, summary_data
     except FileNotFoundError as e:
         st.error(f"Dataset files not found: {e}")
@@ -266,130 +257,6 @@ def load_xgb_model():
         st.error(f"Error loading XGBoost model: {e}")
         return False
 
-# Data Preprocessing Interface
-def preprocessing_interface(raw_data, summary_data):
-    """Render the data preprocessing interface"""
-    st.header("🔧 Data Preprocessing Options")
-    
-    if 'preprocessed_raw_data' not in st.session_state:
-        st.session_state.preprocessed_raw_data = raw_data.copy()
-    if 'preprocessed_summary_data' not in st.session_state:
-        st.session_state.preprocessed_summary_data = summary_data.copy()
-    
-    preprocessing_options = st.multiselect(
-        "Select Preprocessing Steps",
-        options=["Normalization", "Standardization", "Detrending", "Outlier Removal", "Data Augmentation"],
-        default=st.session_state.preprocessing_options
-    )
-    
-    norm_min, norm_max = -1.0, 1.0
-    outlier_threshold = 2.0
-    
-    if "Normalization" in preprocessing_options:
-        st.subheader("Normalization Settings")
-        norm_min = st.slider("Normalization Range Min", -1.0, 0.0, -1.0)
-        norm_max = st.slider("Normalization Range Max", 0.0, 1.0, 1.0)
-    
-    if "Outlier Removal" in preprocessing_options:
-        st.subheader("Outlier Removal Settings")
-        outlier_threshold = st.select_slider(
-            "Outlier Threshold (IQR multiplier)",
-            options=[1.5, 2.0, 2.5, 3.0],
-            value=2.0
-        )
-    
-    if st.button("Apply Preprocessing"):
-        with st.spinner("Applying preprocessing..."):
-            try:
-                processed_raw_data = raw_data.copy()
-                processed_summary_data = summary_data.copy()
-                
-                flux_cols = [col for col in raw_data.columns if col != 'LABEL']
-                numeric_cols = summary_data.select_dtypes(include=[np.number]).columns
-                
-                if "Normalization" in preprocessing_options:
-                    scaler = MinMaxScaler(feature_range=(norm_min, norm_max))
-                    processed_raw_data[flux_cols] = scaler.fit_transform(processed_raw_data[flux_cols])
-                    valid_cols = [col for col in numeric_cols if col not in ['kepid', 'label_encoded']]
-                    if valid_cols:
-                        processed_summary_data[valid_cols] = scaler.fit_transform(processed_summary_data[valid_cols])
-                    st.success("Normalization applied!")
-                
-                if "Standardization" in preprocessing_options:
-                    scaler = StandardScaler()
-                    processed_raw_data[flux_cols] = scaler.fit_transform(processed_raw_data[flux_cols])
-                    valid_cols = [col for col in numeric_cols if col not in ['kepid', 'label_encoded']]
-                    if valid_cols:
-                        processed_summary_data[valid_cols] = scaler.fit_transform(processed_summary_data[valid_cols])
-                    st.session_state.scaler_cnn = scaler
-                    st.session_state.scaler_xgb = scaler
-                    st.success("Standardization applied!")
-                
-                if "Detrending" in preprocessing_options:
-                    for idx in processed_raw_data.index:
-                        flux = processed_raw_data.loc[idx, flux_cols].values
-                        trend = signal.detrend(flux, type='linear')
-                        processed_raw_data.loc[idx, flux_cols] = trend
-                    st.success("Detrending applied to light curves!")
-                
-                if "Outlier Removal" in preprocessing_options:
-                    for col in flux_cols:
-                        Q1 = processed_raw_data[col].quantile(0.25)
-                        Q3 = processed_raw_data[col].quantile(0.75)
-                        IQR = Q3 - Q1
-                        lower_bound = Q1 - outlier_threshold * IQR
-                        upper_bound = Q3 + outlier_threshold * IQR
-                        processed_raw_data[col] = processed_raw_data[col].clip(lower=lower_bound, upper=upper_bound)
-                    for col in numeric_cols:
-                        if col not in ['kepid', 'label_encoded']:
-                            Q1 = processed_summary_data[col].quantile(0.25)
-                            Q3 = processed_summary_data[col].quantile(0.75)
-                            IQR = Q3 - Q1
-                            lower_bound = Q1 - outlier_threshold * IQR
-                            upper_bound = Q3 + outlier_threshold * IQR
-                            processed_summary_data[col] = processed_summary_data[col].clip(lower=lower_bound, upper=upper_bound)
-                    st.success("Outlier removal applied!")
-                
-                if "Data Augmentation" in preprocessing_options:
-                    exoplanet_data = processed_raw_data[processed_raw_data['LABEL'] == 2]
-                    n_samples = len(processed_raw_data[processed_raw_data['LABEL'] == 1]) - len(exoplanet_data)
-                    if n_samples > 0:
-                        augmented_data = resample(exoplanet_data, replace=True, n_samples=n_samples, random_state=42)
-                        noise = np.random.normal(0, 0.01, augmented_data[flux_cols].shape)
-                        augmented_data[flux_cols] += noise
-                        processed_raw_data = pd.concat([processed_raw_data, augmented_data], ignore_index=True)
-                    st.success(f"Data augmentation applied: added {n_samples} synthetic exoplanet samples!")
-                
-                st.session_state.preprocessed_raw_data = processed_raw_data
-                st.session_state.preprocessed_summary_data = processed_summary_data
-                st.session_state.preprocessing_options = preprocessing_options
-                
-                st.subheader("Preprocessing Summary")
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("Raw Data Rows", len(processed_raw_data))
-                    st.metric("Exoplanet Stars", len(processed_raw_data[processed_raw_data['LABEL'] == 2]))
-                with col2:
-                    st.metric("Summary Data Rows", len(processed_summary_data))
-                    st.metric("Confirmed Exoplanets", len(processed_summary_data[processed_summary_data['koi_disposition'] == 'CONFIRMED']))
-                
-                st.subheader("Sample Light Curves (Post-Preprocessing)")
-                fig_plotly = plot_light_curves(processed_raw_data, 3)
-                if fig_plotly:
-                    st.plotly_chart(fig_plotly, use_container_width=True)
-                
-                st.balloons()
-                
-            except Exception as e:
-                st.error(f"Error applying preprocessing: {e}")
-    
-    if st.button("Reset to Original Data"):
-        st.session_state.preprocessed_raw_data = raw_data.copy()
-        st.session_state.preprocessed_summary_data = summary_data.copy()
-        st.session_state.preprocessing_options = ['Standardization']
-        st.success("Data reset to original state!")
-        st.experimental_rerun()
-
 # Landing Page
 def landing_page():
     """Render the landing page"""
@@ -425,12 +292,11 @@ def landing_page():
             """, unsafe_allow_html=True)
     
     _, raw_data, summary_data = load_data()
-    if st.session_state.preprocessed_raw_data is not None:
-        fig_plotly = plot_light_curves(st.session_state.preprocessed_raw_data, 2)
-        if fig_plotly:
-            st.plotly_chart(fig_plotly, use_container_width=True)
-        else:
-            st.warning("Failed to generate sample light curves.")
+    fig_plotly = plot_light_curves(raw_data, 2)
+    if fig_plotly:
+        st.plotly_chart(fig_plotly, use_container_width=True)
+    else:
+        st.warning("Failed to generate sample light curves.")
 
 # Model Comparison Interface
 def model_comparison_interface():
@@ -478,59 +344,6 @@ def model_comparison_interface():
     else:
         st.warning("Please load both CNN and XGBoost models to enable comparison")
 
-# Interactive Model Configuration
-def interactive_model_config():
-    """Render the interactive model configuration interface"""
-    st.header("⚙️ Model Configuration")
-    
-    model_type = st.radio("Select Model Type", ["CNN", "XGBoost"])
-    
-    if model_type == "CNN":
-        st.subheader("CNN Architecture Tuner")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            conv_layers = st.slider("Number of Conv Layers", 1, 4, st.session_state.cnn_config['conv_layers'])
-            filters = st.select_slider("Filters per Layer", options=[8, 16, 32, 64], value=st.session_state.cnn_config['filters'])
-            kernel_size = st.slider("Kernel Size", 3, 9, st.session_state.cnn_config['kernel_size'], step=2)
-        
-        with col2:
-            dense_units = st.slider("Dense Units", 16, 128, st.session_state.cnn_config['dense_units'], step=16)
-            dropout_rate = st.slider("Dropout Rate", 0.1, 0.5, st.session_state.cnn_config['dropout_rate'], step=0.1)
-            learning_rate = st.selectbox("Learning Rate", [1e-2, 1e-3, 1e-4], index=[1e-2, 1e-3, 1e-4].index(st.session_state.cnn_config['learning_rate']))
-        
-        if st.button("🔄 Update CNN Architecture"):
-            st.session_state.cnn_config.update({
-                'conv_layers': conv_layers,
-                'filters': filters,
-                'kernel_size': kernel_size,
-                'dense_units': dense_units,
-                'dropout_rate': dropout_rate,
-                'learning_rate': learning_rate
-            })
-            st.success("CNN architecture updated! Click 'Train Model' to apply changes")
-    
-    else:  # XGBoost
-        st.subheader("XGBoost Hyperparameters")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            n_estimators = st.slider("Number of Trees", 50, 500, st.session_state.xgb_config['n_estimators'])
-            max_depth = st.slider("Max Depth", 3, 10, st.session_state.xgb_config['max_depth'])
-        
-        with col2:
-            learning_rate = st.slider("Learning Rate", 0.01, 0.3, st.session_state.xgb_config['learning_rate'], step=0.01)
-            subsample = st.slider("Subsample Ratio", 0.5, 1.0, st.session_state.xgb_config['subsample'], step=0.1)
-        
-        if st.button("🔄 Update XGBoost Parameters"):
-            st.session_state.xgb_config.update({
-                'n_estimators': n_estimators,
-                'max_depth': max_depth,
-                'learning_rate': learning_rate,
-                'subsample': subsample
-            })
-            st.success("XGBoost parameters updated! Click 'Train Model' to apply changes")
-
 # Prediction Analysis Interface
 def prediction_analysis():
     """Render the prediction analysis interface"""
@@ -539,7 +352,7 @@ def prediction_analysis():
     if 'prediction_results' in st.session_state and st.session_state.prediction_results is not None:
         results = st.session_state.prediction_results
         
-        tab1, tab2, tab3 = st.tabs(["Confidence Analysis", "Feature Importance", "Error Analysis"])
+        tab1, tab3 = st.tabs(["Confidence Analysis", "Error Analysis"])
         
         with tab1:
             st.subheader("Prediction Confidence Distribution")
@@ -567,30 +380,6 @@ def prediction_analysis():
                 st.plotly_chart(fig_plotly, use_container_width=True)
             except Exception as e:
                 st.warning(f"Failed to plot confidence distribution: {str(e)}")
-        
-        with tab2:
-            st.subheader("Feature Importance")
-            if st.session_state.xgb_model and st.session_state.features_to_use:
-                try:
-                    fig_plotly = px.bar(
-                        x=st.session_state.features_to_use,
-                        y=st.session_state.xgb_model.feature_importances_,
-                        labels={'x': 'Features', 'y': 'Importance'},
-                        title='XGBoost Feature Importance',
-                        color=st.session_state.xgb_model.feature_importances_,
-                        color_continuous_map=[COLOR_PALETTE['dark_slate'], COLOR_PALETTE['nebula_purple'], COLOR_PALETTE['starry_white']]
-                    )
-                    fig_plotly.update_layout(
-                        xaxis_tickangle=-45,
-                        paper_bgcolor=COLOR_PALETTE['dark_slate'],
-                        plot_bgcolor=COLOR_PALETTE['dark_slate'],
-                        font=dict(color=COLOR_PALETTE['starry_white'])
-                    )
-                    st.plotly_chart(fig_plotly, use_container_width=True)
-                except Exception as e:
-                    st.warning(f"Failed to plot feature importance: {str(e)}")
-            else:
-                st.warning("Feature importance available only for XGBoost model after training")
         
         with tab3:
             st.subheader("Misclassification Analysis")
@@ -622,13 +411,6 @@ def data_exploration_page(raw_data, summary_data):
     """Render the data exploration page"""
     st.title("📊 Data Exploration")
     st.markdown("---")
-    
-    if st.session_state.preprocessed_raw_data is None or st.session_state.preprocessed_summary_data is None:
-        st.error("Preprocessed data not initialized. Please load data or apply preprocessing.")
-        return
-    
-    raw_data = st.session_state.preprocessed_raw_data
-    summary_data = st.session_state.preprocessed_summary_data
     
     tab1, tab2 = st.tabs(["Light Curve Data", "Summary Data"])
     
@@ -754,13 +536,6 @@ def model_training_page(raw_data, summary_data):
     """Render the model training page"""
     st.title("🤖 Model Training")
     st.markdown("---")
-    
-    if st.session_state.preprocessed_raw_data is None or st.session_state.preprocessed_summary_data is None:
-        st.error("Preprocessed data not initialized. Please load data or apply preprocessing.")
-        return
-    
-    raw_data = st.session_state.preprocessed_raw_data
-    summary_data = st.session_state.preprocessed_summary_data
     
     tab1, tab2 = st.tabs(["CNN Model", "XGBoost Model"])
     
@@ -945,27 +720,6 @@ def model_training_page(raw_data, summary_data):
                             font=dict(color=COLOR_PALETTE['starry_white'])
                         )
                         st.plotly_chart(fig_plotly, use_container_width=True)
-                        
-                        st.subheader("SHAP Feature Importance")
-                        explainer = shap.TreeExplainer(st.session_state.xgb_model)
-                        sample_idx = np.random.choice(X_xgb_scaled.shape[0], size=min(100, X_xgb_scaled.shape[0]), replace=False)
-                        shap_values = explainer.shap_values(X_xgb_scaled[sample_idx])
-                        fig_mpl, ax = plt.subplots(figsize=(10, 6))
-                        shap.summary_plot(
-                            shap_values, 
-                            X_xgb_scaled[sample_idx], 
-                            feature_names=st.session_state.features_to_use, 
-                            show=False
-                        )
-                        ax.set_facecolor(COLOR_PALETTE['dark_slate'])
-                        fig_mpl.set_facecolor(COLOR_PALETTE['dark_slate'])
-                        ax.tick_params(colors=COLOR_PALETTE['starry_white'])
-                        ax.title.set_color(COLOR_PALETTE['starry_white'])
-                        ax.xaxis.label.set_color(COLOR_PALETTE['starry_white'])
-                        ax.yaxis.label.set_color(COLOR_PALETTE['starry_white'])
-                        st.pyplot(fig_mpl)
-                        plt.close(fig_mpl)
-                        
                     except Exception as e:
                         st.warning(f"Could not generate feature importance plots: {str(e)}")
         
@@ -1068,27 +822,6 @@ def model_training_page(raw_data, summary_data):
                         )
                         st.plotly_chart(fig_plotly, use_container_width=True)
                         
-                        st.subheader("SHAP Feature Importance")
-                        explainer = shap.TreeExplainer(xgb_model)
-                        sample_idx = np.random.choice(X_test_xgb.shape[0], size=min(100, X_test_xgb.shape[0]), replace=False)
-                        shap_values = explainer.shap_values(X_test_xgb[sample_idx])
-                        
-                        fig_mpl, ax = plt.subplots(figsize=(10, 6))
-                        shap.summary_plot(
-                            shap_values, 
-                            X_test_xgb[sample_idx], 
-                            feature_names=st.session_state.features_to_use, 
-                            show=False
-                        )
-                        ax.set_facecolor(COLOR_PALETTE['dark_slate'])
-                        fig_mpl.set_facecolor(COLOR_PALETTE['dark_slate'])
-                        ax.tick_params(colors=COLOR_PALETTE['starry_white'])
-                        ax.title.set_color(COLOR_PALETTE['starry_white'])
-                        ax.xaxis.label.set_color(COLOR_PALETTE['starry_white'])
-                        ax.yaxis.label.set_color(COLOR_PALETTE['starry_white'])
-                        st.pyplot(fig_mpl)
-                        plt.close(fig_mpl)
-                        
                     except Exception as e:
                         st.error(f"Training failed: {str(e)}")
                         progress_bar.empty()
@@ -1106,30 +839,6 @@ def predict_with_cnn(data):
         
         processed_data = data.copy()
         flux_cols = [col for col in data.columns if col != 'LABEL']
-        norm_min, norm_max = -1.0, 1.0
-        outlier_threshold = 2.0
-        
-        if "Normalization" in st.session_state.preprocessing_options:
-            scaler = MinMaxScaler(feature_range=(norm_min, norm_max))
-            processed_data[flux_cols] = scaler.fit_transform(processed_data[flux_cols])
-        
-        if "Standardization" in st.session_state.preprocessing_options:
-            processed_data[flux_cols] = st.session_state.scaler_cnn.transform(processed_data[flux_cols])
-        
-        if "Detrending" in st.session_state.preprocessing_options:
-            for idx in processed_data.index:
-                flux = processed_data.loc[idx, flux_cols].values
-                trend = signal.detrend(flux, type='linear')
-                processed_data.loc[idx, flux_cols] = trend
-        
-        if "Outlier Removal" in st.session_state.preprocessing_options:
-            for col in flux_cols:
-                Q1 = processed_data[col].quantile(0.25)
-                Q3 = processed_data[col].quantile(0.75)
-                IQR = Q3 - Q1
-                lower_bound = Q1 - outlier_threshold * IQR
-                upper_bound = Q3 + outlier_threshold * IQR
-                processed_data[col] = processed_data[col].clip(lower=lower_bound, upper=upper_bound)
         
         X = processed_data.drop(columns=['LABEL'] if 'LABEL' in processed_data.columns else [], errors='ignore').values
         X_scaled = st.session_state.scaler_cnn.transform(X)
@@ -1168,24 +877,6 @@ def predict_with_xgb(data):
             
         processed_data = data.copy()
         valid_cols = [col for col in st.session_state.features_to_use if col in processed_data.columns]
-        norm_min, norm_max = -1.0, 1.0
-        outlier_threshold = 2.0
-        
-        if "Normalization" in st.session_state.preprocessing_options:
-            scaler = MinMaxScaler(feature_range=(norm_min, norm_max))
-            processed_data[valid_cols] = scaler.fit_transform(processed_data[valid_cols])
-        
-        if "Standardization" in st.session_state.preprocessing_options:
-            processed_data[valid_cols] = st.session_state.scaler_xgb.transform(processed_data[valid_cols])
-        
-        if "Outlier Removal" in st.session_state.preprocessing_options:
-            for col in valid_cols:
-                Q1 = processed_data[col].quantile(0.25)
-                Q3 = processed_data[col].quantile(0.75)
-                IQR = Q3 - Q1
-                lower_bound = Q1 - outlier_threshold * IQR
-                upper_bound = Q3 + outlier_threshold * IQR
-                processed_data[col] = processed_data[col].clip(lower=lower_bound, upper=upper_bound)
         
         X = processed_data[st.session_state.features_to_use]
         X = X.dropna(axis=1, how='all').replace([np.inf, -np.inf], np.nan)
@@ -1305,7 +996,7 @@ def main():
     initialize_session_state()
     
     os.makedirs("datasets", exist_ok=True)
-    os.makedirs("models frosty", exist_ok=True)
+    os.makedirs("models", exist_ok=True)
     
     _, raw_data, summary_data = load_data()
     
@@ -1313,8 +1004,8 @@ def main():
     st.sidebar.markdown("---")
     page = st.sidebar.radio("Navigation", 
                           ["Home", "Data Exploration", "Model Training", 
-                           "Model Comparison", "Model Configuration", 
-                           "Preprocessing", "Predictions", "Prediction Analysis", "Feedback"],
+                           "Model Comparison", "Predictions", 
+                           "Prediction Analysis", "Feedback"],
                           index=0)
     
     if page == "Home":
@@ -1325,10 +1016,6 @@ def main():
         model_training_page(raw_data, summary_data)
     elif page == "Model Comparison":
         model_comparison_interface()
-    elif page == "Model Configuration":
-        interactive_model_config()
-    elif page == "Preprocessing":
-        preprocessing_interface(raw_data, summary_data)
     elif page == "Predictions":
         predictions_page()
     elif page == "Prediction Analysis":
