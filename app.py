@@ -18,7 +18,7 @@ import pickle
 import os
 from tabulate import tabulate
 
-# Custom CSS for styling
+# Custom CSS with Tailwind-inspired styling
 st.set_page_config(
     page_title="Exoplanet Detection Dashboard",
     layout="wide",
@@ -26,21 +26,23 @@ st.set_page_config(
     page_icon="🌌"
 )
 st.markdown("""
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <style>
-    :root {
-        background-color: #f0f2f6 !important;
-    }
     .main {
-        background-color: black !important;
+        background-color: #1a202c !important;
+        color: #e2e8f0;
     }
     .stButton>button {
-        background-color: #4CAF50 !important;
-        color: white !important;
+        @apply bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700;
     }
     .stTabs {
-        background-color: #ffffff !important;
-        padding: 10px;
-        border-radius: 5px;
+        @apply bg-gray-800 text-white p-4 rounded-lg;
+    }
+    .card {
+        @apply bg-gray-700 p-4 rounded-lg shadow-lg;
+    }
+    .plot-container {
+        @apply p-4 bg-gray-800 rounded-lg;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -60,7 +62,7 @@ if 'features_to_use' not in st.session_state:
     st.session_state.features_to_use = None
 
 # Focal Loss Function for CNN
-def focal_loss(gamma=2.0, alpha=0.5):  # Adjusted gamma and alpha
+def focal_loss(gamma=2.0, alpha=0.5):
     def focal_loss_fixed(y_true, y_pred):
         y_true = tf.cast(y_true, tf.float32)
         y_pred = tf.clip_by_value(y_pred, tf.keras.backend.epsilon(), 1.0 - tf.keras.backend.epsilon())
@@ -95,39 +97,60 @@ raw_data, summary_data = load_data()
 
 if page == "Data Exploration":
     st.title("Exoplanet Data Exploration")
-    st.header("Dataset Overview")
+    st.markdown('<div class="card">', unsafe_allow_html=True)
     dataset_choice = st.selectbox("Select Dataset", ["exoTrain.csv", "cumulative.csv"])
     if dataset_choice == "exoTrain.csv":
         st.write("Light curve data for CNN model")
         st.write(raw_data.head())
         st.subheader("Basic Statistics")
         st.write(raw_data.describe())
-        if st.checkbox("Show Light Curve Plot"):
-            star_id = st.selectbox("Select Star ID", raw_data.index)
-            plt.figure(figsize=(10, 4))
-            plt.plot(raw_data.drop(columns=['LABEL']).iloc[star_id], label=f"Star {star_id}")
-            plt.xlabel("Time")
-            plt.ylabel("Flux")
-            plt.legend()
+        tab1, tab2 = st.tabs(["Light Curve Plot", "Class Distribution"])
+        with tab1:
+            if st.checkbox("Show Light Curve Plot"):
+                star_id = st.selectbox("Select Star ID", raw_data.index)
+                plt.figure(figsize=(10, 4))
+                plt.plot(raw_data.drop(columns=['LABEL']).iloc[star_id], label=f"Star {star_id}", color="#4CAF50")
+                plt.xlabel("Time")
+                plt.ylabel("Flux")
+                plt.legend()
+                st.markdown('<div class="plot-container">', unsafe_allow_html=True)
+                st.pyplot(plt)
+                plt.close()
+                st.markdown('</div>', unsafe_allow_html=True)
+        with tab2:
+            class_counts = raw_data['LABEL'].value_counts()
+            plt.figure(figsize=(6, 4))
+            plt.bar(class_counts.index, class_counts.values, color=["#ff4444", "#4CAF50"])
+            plt.xlabel("Class (1=Exoplanet, 2=No Exoplanet)")
+            plt.ylabel("Count")
+            plt.title("Class Distribution")
+            st.markdown('<div class="plot-container">', unsafe_allow_html=True)
             st.pyplot(plt)
             plt.close()
+            st.markdown('</div>', unsafe_allow_html=True)
     else:
         st.write("Summary data for XGBoost model")
         st.write(summary_data.head())
         st.subheader("Basic Statistics")
         st.write(summary_data.describe())
-        if st.checkbox("Show Feature Distribution"):
+        tab1, tab2 = st.tabs(["Feature Distribution", "Feature Importance Preview"])
+        with tab1:
             feature = st.selectbox("Select Feature", summary_data.select_dtypes(include=[np.number]).columns)
             plt.figure(figsize=(10, 4))
-            sns.histplot(summary_data[feature].dropna(), kde=True)
+            sns.histplot(summary_data[feature].dropna(), kde=True, color="#4CAF50")
             plt.xlabel(feature)
             plt.ylabel("Count")
+            st.markdown('<div class="plot-container">', unsafe_allow_html=True)
             st.pyplot(plt)
             plt.close()
+            st.markdown('</div>', unsafe_allow_html=True)
+        with tab2:
+            st.write("Feature importance will be available after training the XGBoost model.")
+    st.markdown('</div>', unsafe_allow_html=True)
 
 elif page == "Model Training":
     st.title("Model Training")
-    st.header("Train or Load Models")
+    st.markdown('<div class="card">', unsafe_allow_html=True)
     model_choice = st.selectbox("Select Model", ["CNN", "XGBoost"])
     
     if model_choice == "CNN":
@@ -151,7 +174,7 @@ elif page == "Model Training":
                 confirmed_indices = np.where(y_cnn == 1)[0]
                 X_confirmed = X_cnn[confirmed_indices]
                 y_confirmed = y_cnn[confirmed_indices]
-                oversample_factor = 10  # Reduced from 15
+                oversample_factor = 10
                 X_train_oversampled = np.vstack([X_cnn] + [X_confirmed] * oversample_factor)
                 y_train_oversampled = np.hstack([y_cnn] + [y_confirmed] * oversample_factor)
                 
@@ -159,7 +182,7 @@ elif page == "Model Training":
                 class_weight_dict = {i: class_weights[i] for i in range(len(class_weights))}
                 
                 inputs = Input(shape=(X_cnn.shape[1], 1))
-                x = Conv1D(8, kernel_size=7, activation='relu', kernel_regularizer=l2(0.02))(inputs)  # Simplified
+                x = Conv1D(8, kernel_size=7, activation='relu', kernel_regularizer=l2(0.02))(inputs)
                 x = BatchNormalization()(x)
                 x = MaxPooling1D(pool_size=4)(x)
                 x = Conv1D(16, kernel_size=7, activation='relu', kernel_regularizer=l2(0.02))(x)
@@ -178,7 +201,7 @@ elif page == "Model Training":
                 history = model.fit(
                     X_train_oversampled, y_train_oversampled,
                     validation_split=0.2,
-                    epochs=30, batch_size=128,  # Increased from 64
+                    epochs=30, batch_size=128,
                     callbacks=[early_stopping, lr_scheduler],
                     class_weight=class_weight_dict,
                     verbose=1
@@ -191,13 +214,15 @@ elif page == "Model Training":
                 st.success("CNN model trained and saved successfully!")
                 
                 plt.figure(figsize=(10, 4))
-                plt.plot(history.history['loss'], label='Training Loss')
-                plt.plot(history.history['val_loss'], label='Validation Loss')
-                plt.xlabel('Epoch')
-                plt.ylabel('Loss')
+                plt.plot(history.history['loss'], label='Training Loss', color="#4CAF50")
+                plt.plot(history.history['val_loss'], label='Validation Loss', color="#ff4444")
+                plt.xlabel("Epoch")
+                plt.ylabel("Loss")
                 plt.legend()
+                st.markdown('<div class="plot-container">', unsafe_allow_html=True)
                 st.pyplot(plt)
                 plt.close()
+                st.markdown('</div>', unsafe_allow_html=True)
             except Exception as e:
                 st.error(f"Training failed: {str(e)}")
     
@@ -254,13 +279,32 @@ elif page == "Model Training":
             explainer = shap.TreeExplainer(xgb_model)
             shap_values = explainer.shap_values(X_test_xgb)
             plt.figure(figsize=(10, 4))
-            shap.summary_plot(shap_values, X_test_xgb, feature_names=st.session_state.features_to_use, show=False)
+            shap.summary_plot(shap_values, X_test_xgb, feature_names=st.session_state.features_to_use, show=False, color_bar=False)
+            st.markdown('<div class="plot-container">', unsafe_allow_html=True)
             st.pyplot(plt)
             plt.close()
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+            # Feature Importance Bar Chart
+            feature_importance = pd.DataFrame({
+                'feature': st.session_state.features_to_use,
+                'importance': xgb_model.feature_importances_
+            }).sort_values('importance', ascending=False)
+            plt.figure(figsize=(10, 4))
+            plt.bar(feature_importance['feature'], feature_importance['importance'], color="#4CAF50")
+            plt.xlabel("Features")
+            plt.ylabel("Importance")
+            plt.title("Feature Importance")
+            plt.xticks(rotation=45, ha='right')
+            st.markdown('<div class="plot-container">', unsafe_allow_html=True)
+            st.pyplot(plt)
+            plt.close()
+            st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
 elif page == "Predictions":
     st.title("Exoplanet Predictions")
-    st.header("Upload Data for Prediction")
+    st.markdown('<div class="card">', unsafe_allow_html=True)
     model_choice = st.selectbox("Select Model for Prediction", ["CNN", "XGBoost"])
     uploaded_file = st.file_uploader("Upload CSV file", type=["csv"])
     
@@ -304,3 +348,4 @@ elif page == "Predictions":
                     st.write(tabulate(results, headers='keys', tablefmt='psql', showindex=False))
                 except Exception as e:
                     st.error(f"Error making XGBoost predictions: {e}")
+    st.markdown('</div>', unsafe_allow_html=True)
