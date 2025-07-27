@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import matplotlib as mpl
 import os
+import requests
 
 # Define the space-themed color palette
 COLOR_PALETTE = {
@@ -24,7 +25,6 @@ def initialize_session_state():
         'data_loaded': False,
         'raw_data': None,
         'summary_data': None,
-        'prediction_results': None,
     }
     for var, default in session_vars.items():
         if var not in st.session_state:
@@ -110,23 +110,34 @@ def setup_page_config():
 def load_data():
     """Load and cache datasets with error handling"""
     try:
-        # Load exoTrain.csv from Google Drive
+        # Verify Google Drive URL accessibility
         url = "https://drive.google.com/uc?export=download&id=1MxDUIqQ6S9cmi068I62xkbCwZHkpAeJI"
+        st.write("Checking accessibility of exoTrain.csv...")
+        response = requests.head(url, allow_redirects=True)
+        if response.status_code != 200:
+            raise Exception(f"Failed to access Google Drive URL (status code: {response.status_code}). Ensure the file is set to 'Anyone with the link'.")
+
+        # Load exoTrain.csv from Google Drive
+        st.write("Loading exoTrain.csv from Google Drive...")
         raw_data = pd.read_csv(url)
         st.session_state.raw_data = raw_data
         st.session_state.data_loaded = True
+        st.success("exoTrain.csv loaded successfully!")
 
         # Attempt to load cumulative.csv (assumed not present; update if available)
         summary_data = None
         if os.path.exists("datasets/cumulative.csv"):
+            st.write("Loading cumulative.csv from repository...")
             summary_data = pd.read_csv("datasets/cumulative.csv")
             st.session_state.summary_data = summary_data
+            st.success("cumulative.csv loaded successfully!")
         else:
-            st.warning("cumulative.csv not found. Summary data features disabled.")
+            st.warning("cumulative.csv not found in repository. Summary data features disabled.")
 
         return raw_data, summary_data
     except Exception as e:
-        st.error(f"Error loading datasets: {e}")
+        st.error(f"Failed to load datasets: {e}")
+        st.write("Please ensure the Google Drive URL for exoTrain.csv is publicly accessible ('Anyone with the link') and try again.")
         st.session_state.data_loaded = False
         return None, None
 
