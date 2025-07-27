@@ -110,16 +110,17 @@ def setup_page_config():
 def load_data():
     """Load and cache datasets with error handling"""
     try:
-        # Verify Google Drive URL accessibility
-        url = "https://drive.google.com/uc?export=download&id=1MxDUIqQ6S9cmi068I62xkbCwZHkpAeJI"
-        st.write("Checking accessibility of exoTrain.csv...")
-        response = requests.head(url, allow_redirects=True)
+        # Primary Google Drive URL for exoTrain.csv
+        primary_url = "https://drive.google.com/uc?export=download&id=1MxDUIqQ6S9cmi068I62xkbCwZHkpAeJI"
+        st.write("Checking accessibility of exoTrain.csv (Primary URL)...")
+        response = requests.head(primary_url, allow_redirects=True)
         if response.status_code != 200:
-            raise Exception(f"Failed to access Google Drive URL (status code: {response.status_code}). Ensure the file is set to 'Anyone with the link'.")
+            st.warning(f"Primary URL failed (status code: {response.status_code}). Ensure the file is set to 'Anyone with the link'.")
+            raise Exception(f"Primary URL inaccessible (status code: {response.status_code})")
 
         # Load exoTrain.csv from Google Drive
-        st.write("Loading exoTrain.csv from Google Drive...")
-        raw_data = pd.read_csv(url)
+        st.write("Loading exoTrain.csv from Google Drive (Primary URL)...")
+        raw_data = pd.read_csv(primary_url)
         st.session_state.raw_data = raw_data
         st.session_state.data_loaded = True
         st.success("exoTrain.csv loaded successfully!")
@@ -137,7 +138,8 @@ def load_data():
         return raw_data, summary_data
     except Exception as e:
         st.error(f"Failed to load datasets: {e}")
-        st.write("Please ensure the Google Drive URL for exoTrain.csv is publicly accessible ('Anyone with the link') and try again.")
+        st.write("Please ensure the Google Drive URL for exoTrain.csv is publicly accessible ('Anyone with the link').")
+        st.write("You can also try hosting exoTrain.csv on an alternative service like Dropbox and update the URL in the code.")
         st.session_state.data_loaded = False
         return None, None
 
