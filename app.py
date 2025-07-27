@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -7,9 +6,10 @@ from tensorflow.keras.models import load_model, Model
 from tensorflow.keras.layers import Input, Conv1D, MaxPooling1D, GlobalAveragePooling1D, Dense, Dropout, BatchNormalization
 from tensorflow.keras.regularizers import l2
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
-from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.preprocessing import StandardScaler, LabelEncoder, MinMaxScaler
 from sklearn.model_selection import train_test_split
 from sklearn.utils.class_weight import compute_class_weight
+from sklearn.utils import resample
 import xgboost as xgb
 import joblib
 import matplotlib.pyplot as plt
@@ -20,6 +20,8 @@ from tabulate import tabulate
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from scipy import signal
+from streamlit_extras.metric_cards import style_metric_cards
 import matplotlib as mpl
 
 # Define the space-themed color palette
@@ -46,7 +48,9 @@ def initialize_session_state():
         'num_classes': None,
         'prediction_results': None,
         'cnn_config': {'conv_layers': 2, 'filters': [8, 16], 'kernel_size': 5, 'dense_units': 32, 'dropout_rate': 0.3, 'learning_rate': 1e-3},
-        'xgb_config': {'n_estimators': 100, 'max_depth': 5, 'learning_rate': 0.1, 'subsample': 0.8}
+        'xgb_config': {'n_estimators': 100, 'max_depth': 5, 'learning_rate': 0.1, 'subsample': 0.8},
+        'preprocessed_raw_data': None,
+        'preprocessed_summary_data': None
     }
     for var, default in session_vars.items():
         if var not in st.session_state:
@@ -168,6 +172,8 @@ def load_data():
         raw_data = pd.read_csv("datasets/exoTrain.csv")
         summary_data = pd.read_csv("datasets/cumulative.csv")
         st.session_state.data_loaded = True
+        st.session_state.preprocessed_raw_data = raw_data.copy()
+        st.session_state.preprocessed_summary_data = summary_data.copy()
         return None, raw_data, summary_data
     except FileNotFoundError as e:
         st.error(f"Dataset files not found: {e}")
@@ -293,15 +299,16 @@ def landing_page():
             """, unsafe_allow_html=True)
     
     _, raw_data, summary_data = load_data()
-    fig_plotly = plot_light_curves(raw_data, 2)
-    if fig_plotly:
-        st.plotly_chart(fig_plotly, use_container_width=True)
-    else:
-        st.warning("Failed to generate sample light curves.")
+    if st.session_state.preprocessed_raw_data is not None:
+        fig_plotly = plot_light_curves(st.session_state.preprocessed_raw_data, 2)
+        if fig_plotly:
+            st.plotly_chart(fig_plotly, use_container_width=True)
+        else:
+            st.warning("Failed to generate sample light curves.")
 
 # Model Comparison Interface
 def model_comparison_interface():
-    """Render the model精力充沛的 model comparison interface"""
+    """Render the model comparison interface"""
     st.header("📊 Model Performance Comparison")
     
     if st.session_state.cnn_model and st.session_state.xgb_model:
@@ -353,7 +360,7 @@ def prediction_analysis():
     if 'prediction_results' in st.session_state and st.session_state.prediction_results is not None:
         results = st.session_state.prediction_results
         
-        tab1, tab2 = st.tabs(["Confidence Analysis", "Error Analysis"])
+        tab1, tab2 = st.tabs(["Confidence Analysis", "Feature Importance"])
         
         with tab1:
             st.subheader("Prediction Confidence Distribution")
@@ -383,12 +390,28 @@ def prediction_analysis():
                 st.warning(f"Failed to plot confidence distribution: {str(e)}")
         
         with tab2:
-            st.subheader("Misclassification Analysis")
-            st.write("Examples of misclassified observations (placeholder):")
-            st.dataframe(results.head().style.apply(
-                lambda x: ['background-color: ' + COLOR_PALETTE['dark_slate'] for val in x],
-                axis=1
-            ))
+            st.subheader("Feature Importance")
+            if st.session_state.xgb_model and st.session_state.features_to_use:
+                try:
+                    fig_plotly = px.bar(
+                        x=st.session_state.features_to_use,
+                        y=st.session_state.xgb_model.feature_importances_,
+                        labels={'x': 'Features', 'y': 'Importance'},
+                        title='XGBoost Feature Importance',
+                        color=st.session_state.xgb_model.feature_importances_,
+                        color_continuous_map=[COLOR_PALETTE['dark_slate'], COLOR_PALETTE['nebula_purple'], COLOR_PALETTE['starry_white']]
+                    )
+                    fig_plotly.update_layout(
+                        xaxis_tickangle=-45,
+                        paper_bgcolor=COLOR_PALETTE['dark_slate'],
+                        plot_bgcolor=COLOR_PALETTE['dark_slate'],
+                        font=dict(color=COLOR_PALETTE['starry_white'])
+                    )
+                    st.plotly_chart(fig_plotly, use_container_width=True)
+                except Exception as e:
+                    st.warning(f"Failed to plot feature importance: {str(e)}")
+            else:
+                st.warning("Feature importance available only for XGBoost model after training")
     else:
         st.warning("No prediction results available. Make predictions first!")
 
@@ -412,6 +435,13 @@ def data_exploration_page(raw_data, summary_data):
     """Render the data exploration page"""
     st.title("📊 Data Exploration")
     st.markdown("---")
+    
+    if st.session_state.preprocessed_raw_data is None or st.session_state.preprocessed_summary_data is None:
+        st.error("Preprocessed data not initialized. Please load data or apply preprocessing.")
+        return
+    
+    raw_data = st.session_state.preprocessed_raw_data
+    summary_data = st.session_state.preprocessed_summary_data
     
     tab1, tab2 = st.tabs(["Light Curve Data", "Summary Data"])
     
@@ -538,6 +568,13 @@ def model_training_page(raw_data, summary_data):
     st.title("🤖 Model Training")
     st.markdown("---")
     
+    if st.session_state.preprocessed_raw_data is None or st.session_state.preprocessed_summary_data is None:
+        st.error("Preprocessed data not initialized. Please load data or apply preprocessing.")
+        return
+    
+    raw_data = st.session_state.preprocessed_raw_data
+    summary_data = st.session_state.preprocessed_summary_data
+    
     tab1, tab2 = st.tabs(["CNN Model", "XGBoost Model"])
     
     with tab1:
@@ -555,7 +592,7 @@ def model_training_page(raw_data, summary_data):
                     
                     try:
                         if raw_data is None or raw_data.empty:
-                            st.warning("No raw data available for predictions.")
+                            st.warning("No preprocessed raw data available for predictions.")
                         else:
                             st.markdown("---")
                             st.subheader("Sample Predictions")
@@ -606,7 +643,7 @@ def model_training_page(raw_data, summary_data):
                         x = inputs
                         for i in range(st.session_state.cnn_config['conv_layers']):
                             x = Conv1D(
-                                st.session_state.cnn_config['filters'][min(i, len(st.session_state.cnn_config['filters'])-1)],
+                                st.session_state.cnn_config['filters'][min(i, len(st.session_state.cnn_config['filters'])-1],
                                 kernel_size=st.session_state.cnn_config['kernel_size'],
                                 activation='relu',
                                 kernel_regularizer=l2(0.02)
@@ -712,7 +749,7 @@ def model_training_page(raw_data, summary_data):
                             labels={'x': 'Features', 'y': 'Importance'},
                             title='Feature Importance (Pre-Trained Model)',
                             color=st.session_state.xgb_model.feature_importances_,
-                            color_continuous_scale=[COLOR_PALETTE['dark_slate'], COLOR_PALETTE['nebula_purple'], COLOR_PALETTE['starry_white']]
+                            color_continuous_map=[COLOR_PALETTE['dark_slate'], COLOR_PALETTE['nebula_purple'], COLOR_PALETTE['starry_white']]
                         )
                         fig_plotly.update_layout(
                             xaxis_tickangle=-45,
@@ -721,6 +758,7 @@ def model_training_page(raw_data, summary_data):
                             font=dict(color=COLOR_PALETTE['starry_white'])
                         )
                         st.plotly_chart(fig_plotly, use_container_width=True)
+                        
                     except Exception as e:
                         st.warning(f"Could not generate feature importance plots: {str(e)}")
         
@@ -813,7 +851,7 @@ def model_training_page(raw_data, summary_data):
                             labels={'x': 'Features', 'y': 'Importance'},
                             title='Feature Importance',
                             color=xgb_model.feature_importances_,
-                            color_continuous_scale=[COLOR_PALETTE['dark_slate'], COLOR_PALETTE['nebula_purple'], COLOR_PALETTE['starry_white']]
+                            color_continuous_map=[COLOR_PALETTE['dark_slate'], COLOR_PALETTE['nebula_purple'], COLOR_PALETTE['starry_white']]
                         )
                         fig_plotly.update_layout(
                             xaxis_tickangle=-45,
@@ -840,6 +878,8 @@ def predict_with_cnn(data):
         
         processed_data = data.copy()
         flux_cols = [col for col in data.columns if col != 'LABEL']
+        
+        processed_data[flux_cols] = st.session_state.scaler_cnn.transform(processed_data[flux_cols])
         
         X = processed_data.drop(columns=['LABEL'] if 'LABEL' in processed_data.columns else [], errors='ignore').values
         X_scaled = st.session_state.scaler_cnn.transform(X)
@@ -878,6 +918,8 @@ def predict_with_xgb(data):
             
         processed_data = data.copy()
         valid_cols = [col for col in st.session_state.features_to_use if col in processed_data.columns]
+        
+        processed_data[valid_cols] = st.session_state.scaler_xgb.transform(processed_data[valid_cols])
         
         X = processed_data[st.session_state.features_to_use]
         X = X.dropna(axis=1, how='all').replace([np.inf, -np.inf], np.nan)
@@ -1005,8 +1047,7 @@ def main():
     st.sidebar.markdown("---")
     page = st.sidebar.radio("Navigation", 
                           ["Home", "Data Exploration", "Model Training", 
-                           "Model Comparison", "Predictions", 
-                           "Prediction Analysis", "Feedback"],
+                           "Model Comparison", "Predictions", "Prediction Analysis", "Feedback"],
                           index=0)
     
     if page == "Home":
