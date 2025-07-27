@@ -3,9 +3,11 @@ import pandas as pd
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.models import load_model
+from tensorflow.keras.layers import Input, Conv1D, MaxPooling1D, GlobalAveragePooling1D, Dense, Dropout, BatchNormalization
+from tensorflow.keras.regularizers import l2
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.model_selection import train_test_split
-from sklearn.utils.class_weight import compute_class_weight  # Added
+from sklearn.utils.class_weight import compute_class_weight
 import xgboost as xgb
 import joblib
 import matplotlib.pyplot as plt
@@ -28,7 +30,7 @@ st.markdown("""
         background-color: #f0f2f6 !important;
     }
     .main {
-        background-color: #f0f2f6 !important;
+        background-color: #black !important;
     }
     .stButton>button {
         background-color: #4CAF50 !important;
