@@ -26,20 +26,19 @@ from streamlit_extras.metric_cards import style_metric_cards
 # Initialize session state and memory management
 def initialize_session_state():
     """Initialize all session state variables"""
-    if 'cnn_model' not in st.session_state:
-        st.session_state.cnn_model = None
-    if 'xgb_model' not in st.session_state:
-        st.session_state.xgb_model = None
-    if 'scaler_cnn' not in st.session_state:
-        st.session_state.scaler_cnn = None
-    if 'scaler_xgb' not in st.session_state:
-        st.session_state.scaler_xgb = None
-    if 'label_encoder' not in st.session_state:
-        st.session_state.label_encoder = None
-    if 'features_to_use' not in st.session_state:
-        st.session_state.features_to_use = None
-    if 'data_loaded' not in st.session_state:
-        st.session_state.data_loaded = False
+    session_vars = {
+        'cnn_model': None,
+        'xgb_model': None,
+        'scaler_cnn': None,
+        'scaler_xgb': None,
+        'label_encoder': None,
+        'features_to_use': None,
+        'data_loaded': False,
+        'num_classes': None
+    }
+    for var, default in session_vars.items():
+        if var not in st.session_state:
+            st.session_state[var] = default
 
 # Clear memory and session state
 def clear_memory():
@@ -218,6 +217,7 @@ def load_xgb_model():
         st.session_state.scaler_xgb = joblib.load('models/scaler_xgb.pkl')
         st.session_state.label_encoder = joblib.load('models/label_encoder.pkl')
         st.session_state.features_to_use = joblib.load('models/features_to_use.pkl')
+        st.session_state.num_classes = len(st.session_state.label_encoder.classes_)
         st.success("XGBoost model and components loaded successfully!")
         return True
     except Exception as e:
@@ -347,7 +347,7 @@ def model_training_page(raw_data, summary_data):
                         
                         # Data preparation
                         X_cnn = raw_data.drop(columns=['LABEL']).values
-                        y_cnn = raw_data['LABEL'].values - 1
+                        y_cnn = raw_data['LABEL'].values - 1  # Convert to 0 and 1
                         scaler_cnn = StandardScaler()
                         X_cnn_scaled = scaler_cnn.fit_transform(X_cnn)
                         X_cnn = X_cnn_scaled.reshape(X_cnn_scaled.shape[0], X_cnn_scaled.shape[1], 1)
@@ -366,10 +366,10 @@ def model_training_page(raw_data, summary_data):
                         
                         # Simplified model architecture
                         inputs = Input(shape=(X_cnn.shape[1], 1))
-                        x = Conv1D(8, kernel_size=5, activation='relu', kernel_regularizer=l2(0.02))(inputs)  # Reduced kernel size
+                        x = Conv1D(8, kernel_size=5, activation='relu', kernel_regularizer=l2(0.02))(inputs)
                         x = BatchNormalization()(x)
                         x = MaxPooling1D(pool_size=4)(x)
-                        x = Conv1D(16, kernel_size=5, activation='relu', kernel_regularizer=l2(0.02))(x)  # Reduced kernel size
+                        x = Conv1D(16, kernel_size=5, activation='relu', kernel_regularizer=l2(0.02))(x)
                         x = BatchNormalization()(x)
                         x = MaxPooling1D(pool_size=4)(x)
                         x = GlobalAveragePooling1D()(x)
@@ -380,8 +380,8 @@ def model_training_page(raw_data, summary_data):
                         
                         # Training configuration
                         model.compile(optimizer='adam', loss=focal_loss(gamma=2.0, alpha=0.5), metrics=['accuracy'])
-                        early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)  # Reduced patience
-                        lr_scheduler = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=3, min_lr=1e-6)  # Reduced patience
+                        early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+                        lr_scheduler = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=3, min_lr=1e-6)
                         
                         # Training with progress
                         progress_bar = st.progress(0)
@@ -389,15 +389,15 @@ def model_training_page(raw_data, summary_data):
                         
                         class TrainingCallback(tf.keras.callbacks.Callback):
                             def on_epoch_end(self, epoch, logs=None):
-                                progress = (epoch + 1) / 20  # Reduced epochs
+                                progress = (epoch + 1) / 20
                                 progress_bar.progress(min(progress, 1.0))
                                 status_text.text(f"Epoch {epoch + 1}/20 - Loss: {logs['loss']:.4f} - Val Loss: {logs['val_loss']:.4f}")
                         
                         history = model.fit(
                             X_train_oversampled, y_train_oversampled,
                             validation_split=0.2,
-                            epochs=20,  # Reduced epochs
-                            batch_size=64,  # Reduced batch size
+                            epochs=20,
+                            batch_size=64,
                             callbacks=[early_stopping, lr_scheduler, TrainingCallback()],
                             class_weight=class_weight_dict,
                             verbose=0
@@ -478,17 +478,26 @@ def model_training_page(raw_data, summary_data):
                         X_xgb = X_xgb.dropna(axis=1, how='all').replace([np.inf, -np.inf], np.nan)
                         X_xgb = X_xgb.fillna(X_xgb.mean(numeric_only=True))
                         
-                        # Label encoding
+                        # Label encoding with verification
                         if 'label_encoded' not in summary_data.columns:
                             st.session_state.label_encoder = LabelEncoder()
                             summary_data['label_encoded'] = st.session_state.label_encoder.fit_transform(summary_data['koi_disposition'])
                             joblib.dump(st.session_state.label_encoder, 'models/label_encoder.pkl')
                         
                         y_xgb = summary_data['label_encoded']
+                        st.session_state.num_classes = len(np.unique(y_xgb))
                         
-                        # Train-test split
+                        # Verify data shapes before splitting
+                        if len(X_xgb) != len(y_xgb):
+                            st.error(f"Feature and target arrays have different lengths: X({len(X_xgb)}) vs y({len(y_xgb)})")
+                            st.stop()
+                        
+                        # Train-test split with stratification
                         X_train_xgb, X_test_xgb, y_train_xgb, y_test_xgb = train_test_split(
-                            X_xgb, y_xgb, test_size=0.3, stratify=y_xgb, random_state=42
+                            X_xgb, y_xgb, 
+                            test_size=0.3, 
+                            stratify=y_xgb, 
+                            random_state=42
                         )
                         
                         # Feature scaling
@@ -496,15 +505,23 @@ def model_training_page(raw_data, summary_data):
                         X_train_xgb = scaler_xgb.fit_transform(X_train_xgb)
                         X_test_xgb = scaler_xgb.transform(X_test_xgb)
                         
-                        # Simplified model
+                        # Model configuration based on number of classes
+                        if st.session_state.num_classes > 2:
+                            objective = 'multi:softprob'
+                            eval_metric = 'mlogloss'
+                        else:
+                            objective = 'binary:logistic'
+                            eval_metric = 'logloss'
+                        
                         xgb_model = xgb.XGBClassifier(
-                            objective='binary:logistic',
-                            eval_metric='logloss',
+                            objective=objective,
+                            eval_metric=eval_metric,
                             random_state=42,
-                            n_estimators=50,  # Reduced from 100
-                            max_depth=3,      # Reduced from 5
+                            n_estimators=50,
+                            max_depth=3,
                             learning_rate=0.1,
-                            tree_method='hist'  # More memory-efficient
+                            tree_method='hist',
+                            num_class=st.session_state.num_classes if st.session_state.num_classes > 2 else None
                         )
                         
                         # Training with progress
