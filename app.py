@@ -5,6 +5,7 @@ import tensorflow as tf
 from tensorflow.keras.models import load_model
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.model_selection import train_test_split
+from sklearn.utils.class_weight import compute_class_weight  # Added
 import xgboost as xgb
 import joblib
 import matplotlib.pyplot as plt
@@ -13,14 +14,31 @@ import shap
 import pickle
 import os
 from tabulate import tabulate
-from sklearn.utils.class_weight import compute_class_weight
 
 # Custom CSS for styling
+st.set_page_config(
+    page_title="Exoplanet Detection Dashboard",
+    layout="wide",
+    initial_sidebar_state="expanded",
+    page_icon="🌌"
+)
 st.markdown("""
     <style>
-    .main { background-color: #f0f2f6; }
-    .stButton>button { background-color: #4CAF50; color: white; }
-    .stTabs { background-color: #ffffff; padding: 10px; border-radius: 5px; }
+    :root {
+        background-color: #f0f2f6 !important;
+    }
+    .main {
+        background-color: #f0f2f6 !important;
+    }
+    .stButton>button {
+        background-color: #4CAF50 !important;
+        color: white !important;
+    }
+    .stTabs {
+        background-color: #ffffff !important;
+        padding: 10px;
+        border-radius: 5px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
