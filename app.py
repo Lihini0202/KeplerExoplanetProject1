@@ -143,29 +143,26 @@ def load_data():
 
         st.write("Loading exoTrain.csv from Google Drive...")
         raw_data = pd.read_csv(primary_url)
-        
-        # Debug: Display column names
-        st.write(f"exoTrain.csv columns: {list(raw_data.columns)}")
-        
         st.session_state.raw_data = raw_data
         st.session_state.data_loaded = True
         st.success("exoTrain.csv loaded successfully!")
 
         # Attempt to load cumulative.csv (optional)
         summary_data = None
-        if os.path.exists("datasets/cumulative.csv"):
+        # This path assumes the 'datasets' folder is in the same directory as the script.
+        # Update path if your directory structure is different.
+        summary_path = "cumulative.csv" 
+        if os.path.exists(summary_path):
             st.write("Loading cumulative.csv from repository...")
-            summary_data = pd.read_csv("datasets/cumulative.csv")
-            st.write(f"cumulative.csv columns: {list(summary_data.columns)}")
+            summary_data = pd.read_csv(summary_path)
             st.session_state.summary_data = summary_data
             st.success("cumulative.csv loaded successfully!")
         else:
-            st.warning("cumulative.csv not found in repository. Summary data features disabled.")
+            st.warning("cumulative.csv not found in the root directory. Summary data features will be disabled.")
 
         return raw_data, summary_data
     except Exception as e:
         st.error(f"Failed to load datasets: {e}")
-        st.write("Please ensure the Google Drive URL for exoTrain.csv is publicly accessible ('Anyone with the link').")
         st.session_state.data_loaded = False
         return None, None
 
@@ -174,76 +171,64 @@ def load_cnn_model():
     """Safely load CNN model with memory cleanup"""
     try:
         tf.keras.backend.clear_session()
-        if 'cnn_model' in st.session_state:
-            del st.session_state.cnn_model
         # Placeholder: Replace with actual Google Drive URL for the model
         model_url = "YOUR_CNN_MODEL_GOOGLE_DRIVE_URL"
         model_path = "cnn_exoplanet_model.keras"
-        if model_url:
-            response = requests.get(model_url)
-            with open(model_path, 'wb') as f:
-                f.write(response.content)
+        # The following block is a placeholder for downloading the model from a URL
+        # if model_url != "YOUR_CNN_MODEL_GOOGLE_DRIVE_URL":
+        #     response = requests.get(model_url)
+        #     with open(model_path, 'wb') as f:
+        #         f.write(response.content)
+
         st.session_state.cnn_model = load_model(
             model_path,
             custom_objects={'focal_loss_fixed': focal_loss(gamma=2.0, alpha=0.5)}
         )
+        
         # Placeholder: Replace with actual Google Drive URL for the scaler
         scaler_url = "YOUR_SCALER_CNN_GOOGLE_DRIVE_URL"
         scaler_path = "scaler_cnn.pkl"
-        if scaler_url:
-            response = requests.get(scaler_url)
-            with open(scaler_path, 'wb') as f:
-                f.write(response.content)
+        # if scaler_url != "YOUR_SCALER_CNN_GOOGLE_DRIVE_URL":
+        #     response = requests.get(scaler_url)
+        #     with open(scaler_path, 'wb') as f:
+        #         f.write(response.content)
+        
         st.session_state.scaler_cnn = joblib.load(scaler_path)
         st.success("CNN model and scaler loaded successfully!")
         return True
     except Exception as e:
-        st.error(f"Error loading CNN model: {e}")
+        st.error(f"Error loading CNN model: {e}. Ensure 'cnn_exoplanet_model.keras' and 'scaler_cnn.pkl' are in the root directory.")
         return False
 
 # Load XGBoost model
 def load_xgb_model():
     """Safely load XGBoost model with components"""
     try:
-        if 'xgb_model' in st.session_state:
-            del st.session_state.xgb_model
         # Placeholder: Replace with actual Google Drive URL for the model
         model_url = "YOUR_XGB_MODEL_GOOGLE_DRIVE_URL"
         model_path = "xgb_model.pkl"
-        if model_url:
-            response = requests.get(model_url)
-            with open(model_path, 'wb') as f:
-                f.write(response.content)
         st.session_state.xgb_model = joblib.load(model_path)
+        
         # Placeholder: Replace with actual Google Drive URL for the scaler
         scaler_url = "YOUR_SCALER_XGB_GOOGLE_DRIVE_URL"
         scaler_path = "scaler_xgb.pkl"
-        if scaler_url:
-            response = requests.get(scaler_url)
-            with open(scaler_path, 'wb') as f:
-                f.write(response.content)
         st.session_state.scaler_xgb = joblib.load(scaler_path)
+
         # Placeholder: Replace with actual Google Drive URL for the encoder
         encoder_url = "YOUR_LABEL_ENCODER_GOOGLE_DRIVE_URL"
         encoder_path = "label_encoder.pkl"
-        if encoder_url:
-            response = requests.get(encoder_url)
-            with open(encoder_path, 'wb') as f:
-                f.write(response.content)
         st.session_state.label_encoder = joblib.load(encoder_path)
+
         # Placeholder: Replace with actual Google Drive URL for features
         features_url = "YOUR_FEATURES_TO_USE_GOOGLE_DRIVE_URL"
         features_path = "features_to_use.pkl"
-        if features_url:
-            response = requests.get(features_url)
-            with open(features_path, 'wb') as f:
-                f.write(response.content)
         st.session_state.features_to_use = joblib.load(features_path)
+        
         st.session_state.num_classes = len(st.session_state.label_encoder.classes_)
         st.success("XGBoost model and components loaded successfully!")
         return True
     except Exception as e:
-        st.error(f"Error loading XGBoost model: {e}")
+        st.error(f"Error loading XGBoost model: {e}. Ensure model, scaler, encoder, and features files are in the root directory.")
         return False
 
 # Light curve visualization
@@ -252,67 +237,49 @@ def plot_light_curves(data, n_samples=5, label_col='LABEL'):
     try:
         if label_col not in data.columns:
             st.warning(f"Column '{label_col}' not found. Skipping exoplanet/non-exoplanet differentiation.")
-            # Plot all samples without differentiation
             samples = data.sample(n=min(n_samples, len(data)))
             fig_plotly = make_subplots(rows=1, cols=1, subplot_titles=("Sample Light Curves",))
             
             for idx, row in samples.iterrows():
                 fig_plotly.add_trace(
                     go.Scatter(
-                        x=list(range(len(row))),
-                        y=row,
-                        mode='lines',
-                        name=f'Star {idx}',
+                        x=list(range(len(row))), y=row, mode='lines', name=f'Star {idx}',
                         line=dict(color=COLOR_PALETTE['nebula_purple'])
-                    ),
-                    row=1, col=1
+                    ), row=1, col=1
                 )
         else:
-            exoplanet_samples = data[data[label_col] == 2].sample(n=min(n_samples, len(data[data[label_col] == 2])))
-            non_exoplanet_samples = data[data[label_col] == 1].sample(n=min(n_samples, len(data[data[label_col] == 1])))
+            exoplanet_data = data[data[label_col] == 2]
+            non_exoplanet_data = data[data[label_col] == 1]
+
+            exoplanet_samples = exoplanet_data.sample(n=min(n_samples, len(exoplanet_data)))
+            non_exoplanet_samples = non_exoplanet_data.sample(n=min(n_samples, len(non_exoplanet_data)))
             
             fig_plotly = make_subplots(rows=1, cols=2, subplot_titles=("Exoplanet Stars", "Non-Exoplanet Stars"))
             
             for idx, row in exoplanet_samples.iterrows():
                 fig_plotly.add_trace(
                     go.Scatter(
-                        x=list(range(len(row[1:]))),
-                        y=row[1:],
-                        mode='lines',
-                        name=f'Exoplanet Star {idx}',
+                        x=list(range(len(row[1:]))), y=row[1:], mode='lines', name=f'Exoplanet Star {idx}',
                         line=dict(color=COLOR_PALETTE['nebula_purple'])
-                    ),
-                    row=1, col=1
+                    ), row=1, col=1
                 )
             
             for idx, row in non_exoplanet_samples.iterrows():
                 fig_plotly.add_trace(
                     go.Scatter(
-                        x=list(range(len(row[1:]))),
-                        y=row[1:],
-                        mode='lines',
-                        name=f'Non-Exoplanet Star {idx}',
+                        x=list(range(len(row[1:]))), y=row[1:], mode='lines', name=f'Non-Exoplanet Star {idx}',
                         line=dict(color=COLOR_PALETTE['starry_white'])
-                    ),
-                    row=1, col=2
+                    ), row=1, col=2
                 )
         
         fig_plotly.update_layout(
-            height=400,
-            showlegend=False,
-            margin=dict(l=20, r=20, t=40, b=20),
-            paper_bgcolor=COLOR_PALETTE['dark_slate'],
-            plot_bgcolor=COLOR_PALETTE['dark_slate'],
+            height=400, showlegend=False, margin=dict(l=20, r=20, t=40, b=20),
+            paper_bgcolor=COLOR_PALETTE['dark_slate'], plot_bgcolor=COLOR_PALETTE['dark_slate'],
             font=dict(color=COLOR_PALETTE['starry_white'])
         )
         
-        if label_col in data.columns:
-            fig_plotly.update_xaxes(title_text="Time", title_font=dict(color=COLOR_PALETTE['starry_white']), row=1, col=1)
-            fig_plotly.update_xaxes(title_text="Time", title_font=dict(color=COLOR_PALETTE['starry_white']), row=1, col=2)
-            fig_plotly.update_yaxes(title_text="Flux", title_font=dict(color=COLOR_PALETTE['starry_white']), row=1, col=2)
-        else:
-            fig_plotly.update_xaxes(title_text="Time", title_font=dict(color=COLOR_PALETTE['starry_white']), row=1, col=1)
-            fig_plotly.update_yaxes(title_text="Flux", title_font=dict(color=COLOR_PALETTE['starry_white']), row=1, col=1)
+        fig_plotly.update_xaxes(title_text="Time", title_font=dict(color=COLOR_PALETTE['starry_white']))
+        fig_plotly.update_yaxes(title_text="Flux", title_font=dict(color=COLOR_PALETTE['starry_white']))
         
         return fig_plotly
     except Exception as e:
@@ -323,8 +290,7 @@ def plot_light_curves(data, n_samples=5, label_col='LABEL'):
 def landing_page(raw_data):
     """Render the landing page"""
     st.title("🌌 Exoplanet Detection Dashboard")
-    st.markdown(f"""
-    <div style="color: {COLOR_PALETTE['starry_white']}">
+    st.markdown("""
     ## Discover Exoplanets Through Data
     
     This interactive dashboard allows you to:
@@ -338,22 +304,9 @@ def landing_page(raw_data):
     💬 **Feedback**: Share your suggestions for improvement
     
     *Navigate using the sidebar to get started!*
-    </div>
-    """, unsafe_allow_html=True)
+    """)
     
-    if st.button("🚀 Quick Start Guide"):
-        with st.expander("Getting Started"):
-            st.markdown(f"""
-            <div style="color: {COLOR_PALETTE['starry_white']}">
-            1. **Data Exploration**: View light curves and dataset statistics
-            2. **Predictions**: Upload data for classification (requires pre-trained models)
-            3. **Note**: Model training is disabled due to resource constraints
-            
-            Pro Tip: Start with the Data Exploration tab to understand the dataset!
-            </div>
-            """, unsafe_allow_html=True)
-    
-    if st.session_state.data_loaded and raw_data is not None:
+    if raw_data is not None:
         fig_plotly = plot_light_curves(raw_data, 2)
         if fig_plotly:
             st.plotly_chart(fig_plotly, use_container_width=True)
@@ -372,154 +325,53 @@ def data_exploration_page(raw_data, summary_data):
     
     with tab1:
         st.header("Light Curve Data Overview")
-        
         if raw_data is not None:
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.metric("Total Stars", len(raw_data))
+                st.metric("Total Stars", f"{len(raw_data):,}")
             with col2:
-                if 'LABEL' in raw_data.columns:
-                    st.metric("Exoplanet Stars", len(raw_data[raw_data['LABEL'] == 2]))
-                else:
-                    st.metric("Exoplanet Stars", "N/A (LABEL column missing)")
+                metric_val = f"{len(raw_data[raw_data['LABEL'] == 2]):,}" if 'LABEL' in raw_data.columns else "N/A"
+                st.metric("Exoplanet Stars", metric_val)
             with col3:
-                if 'LABEL' in raw_data.columns:
-                    st.metric("Non-Exoplanet Stars", len(raw_data[raw_data['LABEL'] == 1]))
-                else:
-                    st.metric("Non-Exoplanet Stars", "N/A (LABEL column missing)")
+                metric_val = f"{len(raw_data[raw_data['LABEL'] == 1]):,}" if 'LABEL' in raw_data.columns else "N/A"
+                st.metric("Non-Exoplanet Stars", metric_val)
             
             st.markdown("---")
-            
             st.subheader("Sample Light Curves")
             n_samples = st.slider("Number of samples to display", 1, 10, 3)
-            fig_plotly = plot_light_curves(raw_data, n_samples)
-            if fig_plotly:
-                st.plotly_chart(fig_plotly, use_container_width=True)
-            
-            st.markdown("---")
-            
-            st.subheader("Flux Distribution Comparison")
-            if 'LABEL' in raw_data.columns:
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    try:
-                        fig_plotly = px.histogram(
-                            raw_data[raw_data['LABEL'] == 2].iloc[:, 1:].mean(axis=1),
-                            nbins=50,
-                            title="Exoplanet Stars Flux Distribution",
-                            color_discrete_sequence=[COLOR_PALETTE['nebula_purple']],
-                            labels={'value': 'Average Flux'}
-                        )
-                        fig_plotly.update_layout(
-                            paper_bgcolor=COLOR_PALETTE['dark_slate'],
-                            plot_bgcolor=COLOR_PALETTE['dark_slate'],
-                            font=dict(color=COLOR_PALETTE['starry_white'])
-                        )
-                        st.plotly_chart(fig_plotly, use_container_width=True)
-                    except Exception as e:
-                        st.warning(f"Failed to plot exoplanet flux distribution: {e}")
-                
-                with col2:
-                    try:
-                        fig_plotly = px.histogram(
-                            raw_data[raw_data['LABEL'] == 1].iloc[:, 1:].mean(axis=1),
-                            nbins=50,
-                            title="Non-Exoplanet Stars Flux Distribution",
-                            color_discrete_sequence=[COLOR_PALETTE['starry_white']],
-                            labels={'value': 'Average Flux'}
-                        )
-                        fig_plotly.update_layout(
-                            paper_bgcolor=COLOR_PALETTE['dark_slate'],
-                            plot_bgcolor=COLOR_PALETTE['dark_slate'],
-                            font=dict(color=COLOR_PALETTE['starry_white'])
-                        )
-                        st.plotly_chart(fig_plotly, use_container_width=True)
-                    except Exception as e:
-                        st.warning(f"Failed to plot non-exoplanet flux distribution: {e}")
-            else:
-                st.warning("Flux distribution plots skipped due to missing 'LABEL' column.")
+            fig_light_curves = plot_light_curves(raw_data, n_samples)
+            if fig_light_curves:
+                st.plotly_chart(fig_light_curves, use_container_width=True)
         else:
             st.error("Light curve data not available.")
     
     with tab2:
         st.header("Summary Data Overview")
-        
         if summary_data is not None:
             col1, col2 = st.columns(2)
             with col1:
-                st.metric("Total Observations", len(summary_data))
+                st.metric("Total Observations", f"{len(summary_data):,}")
             with col2:
                 if 'koi_disposition' in summary_data.columns:
                     dispositions = summary_data['koi_disposition'].value_counts()
-                    st.metric("Confirmed Exoplanets", dispositions.get('CONFIRMED', 0))
+                    st.metric("Confirmed Exoplanets", f"{dispositions.get('CONFIRMED', 0):,}")
                 else:
-                    st.metric("Confirmed Exoplanets", "N/A (koi_disposition column missing)")
-            
+                    st.metric("Confirmed Exoplanets", "N/A")
+
             st.markdown("---")
-            
             st.subheader("Exoplanet Dispositions")
             if 'koi_disposition' in summary_data.columns:
-                try:
-                    fig_plotly = px.pie(
-                        summary_data,
-                        names='koi_disposition',
-                        hole=0.3,
-                        color_discrete_sequence=[COLOR_PALETTE['nebula_purple'], COLOR_PALETTE['starry_white'], COLOR_PALETTE['dark_slate']]
-                    )
-                    fig_plotly.update_layout(
-                        paper_bgcolor=COLOR_PALETTE['dark_slate'],
-                        plot_bgcolor=COLOR_PALETTE['dark_slate'],
-                        font=dict(color=COLOR_PALETTE['starry_white'])
-                    )
-                    st.plotly_chart(fig_plotly, use_container_width=True)
-                except Exception as e:
-                    st.warning(f"Failed to plot dispositions: {e}")
-            else:
-                st.warning("Exoplanet dispositions plot skipped due to missing 'koi_disposition' column.")
-            
-            st.markdown("---")
-            
-            st.subheader("Feature Distributions")
-            numeric_cols = summary_data.select_dtypes(include=[np.number]).columns
-            if len(numeric_cols) > 0:
-                feature = st.selectbox(
-                    "Select feature to visualize",
-                    numeric_cols,
-                    index=0
+                fig_disposition = px.pie(
+                    summary_data, names='koi_disposition', hole=0.3,
+                    color_discrete_sequence=[COLOR_PALETTE['nebula_purple'], COLOR_PALETTE['starry_white'], '#868e96']
                 )
-                
-                try:
-                    if 'koi_disposition' in summary_data.columns:
-                        fig_plotly = px.histogram(
-                            summary_data,
-                            x=feature,
-                            color='koi_disposition',
-                            marginal="box",
-                            nbins=50,
-                            barmode='overlay',
-                            color_discrete_sequence=[COLOR_PALETTE['nebula_purple'], COLOR_PALETTE['starry_white'], COLOR_PALETTE['dark_slate']]
-                        )
-                    else:
-                        fig_plotly = px.histogram(
-                            summary_data,
-                            x=feature,
-                            nbins=50,
-                            title=f"Distribution of {feature}",
-                            color_discrete_sequence=[COLOR_PALETTE['nebula_purple']]
-                        )
-                    fig_plotly.update_layout(
-                        paper_bgcolor=COLOR_PALETTE['dark_slate'],
-                        plot_bgcolor=COLOR_PALETTE['dark_slate'],
-                        font=dict(color=COLOR_PALETTE['starry_white'])
-                    )
-                    st.plotly_chart(fig_plotly, use_container_width=True)
-                except Exception as e:
-                    st.warning(f"Failed to plot feature distribution: {e}")
-            else:
-                st.warning("No numeric columns available for feature distribution.")
+                fig_disposition.update_layout(
+                    paper_bgcolor=COLOR_PALETTE['dark_slate'], plot_bgcolor=COLOR_PALETTE['dark_slate'],
+                    font=dict(color=COLOR_PALETTE['starry_white'])
+                )
+                st.plotly_chart(fig_disposition, use_container_width=True)
         else:
-            st.warning("Summary data not available. Please provide cumulative.csv.")
+            st.warning("Summary data (cumulative.csv) not available.")
 
 # Predict with CNN
 def predict_with_cnn(data):
@@ -528,31 +380,17 @@ def predict_with_cnn(data):
         if st.session_state.scaler_cnn is None:
             raise ValueError("CNN scaler not loaded.")
         
-        tf.keras.backend.clear_session()
-        
-        processed_data = data.copy()
-        flux_cols = [col for col in data.columns if col != 'LABEL']
-        
-        X = processed_data.drop(columns=['LABEL'] if 'LABEL' in processed_data.columns else [], errors='ignore').values
+        X = data.drop(columns=['LABEL'], errors='ignore').values
         X_scaled = st.session_state.scaler_cnn.transform(X)
         X_reshaped = X_scaled.reshape(X_scaled.shape[0], X_scaled.shape[1], 1)
         
-        batch_size = min(1000, len(X_reshaped))
-        predictions = []
-        for i in range(0, len(X_reshaped), batch_size):
-            batch = X_reshaped[i:i + batch_size]
-            preds = st.session_state.cnn_model.predict(batch, verbose=0)
-            predictions.extend(preds.flatten())
-        
-        predictions = (np.array(predictions) > 0.5).astype(int)
+        predictions = st.session_state.cnn_model.predict(X_reshaped).flatten()
         
         results = pd.DataFrame({
-            'Star ID': processed_data.index,
-            'Prediction': ['Exoplanet' if p == 1 else 'Non-Exoplanet' for p in predictions],
-            'Confidence': [f"{max(pred, 1-pred)*100:.2f}%" for pred in predictions]
+            'Star ID': data.index,
+            'Prediction': ['Exoplanet' if p > 0.5 else 'Non-Exoplanet' for p in predictions],
+            'Confidence': [f"{p*100:.2f}%" if p > 0.5 else f"{(1-p)*100:.2f}%" for p in predictions]
         })
-        
-        st.session_state.prediction_results = results
         return results
     except Exception as e:
         st.error(f"CNN prediction error: {e}")
@@ -562,30 +400,27 @@ def predict_with_cnn(data):
 def predict_with_xgb(data):
     """Make predictions with XGBoost model"""
     try:
-        if st.session_state.scaler_xgb is None or st.session_state.label_encoder is None:
-            raise ValueError("XGBoost scaler or label encoder not loaded.")
+        if any(comp is None for comp in [st.session_state.scaler_xgb, st.session_state.label_encoder, st.session_state.features_to_use]):
+            raise ValueError("XGBoost components (scaler, encoder, features) not loaded.")
         
         missing_features = set(st.session_state.features_to_use) - set(data.columns)
         if missing_features:
-            raise ValueError(f"Missing required features: {missing_features}")
+            raise ValueError(f"Missing required features for XGBoost: {missing_features}")
             
-        processed_data = data.copy()
-        X = processed_data[st.session_state.features_to_use]
-        X = X.dropna(axis=1, how='all').replace([np.inf, -np.inf], np.nan)
-        X = X.fillna(X.mean(numeric_only=True))
+        X = data[st.session_state.features_to_use].copy()
+        X.replace([np.inf, -np.inf], np.nan, inplace=True)
+        X.fillna(X.mean(numeric_only=True), inplace=True)
         X_scaled = st.session_state.scaler_xgb.transform(X)
         
-        predictions = st.session_state.xgb_model.predict(X_scaled)
+        predictions_encoded = st.session_state.xgb_model.predict(X_scaled)
         prediction_probs = st.session_state.xgb_model.predict_proba(X_scaled)
-        predictions = st.session_state.label_encoder.inverse_transform(predictions)
+        predictions = st.session_state.label_encoder.inverse_transform(predictions_encoded)
         
         results = pd.DataFrame({
-            'Star ID': processed_data.index,
+            'Star ID': data.index,
             'Prediction': predictions,
             'Confidence': [f"{max(probs)*100:.2f}%" for probs in prediction_probs]
         })
-        
-        st.session_state.prediction_results = results
         return results
     except Exception as e:
         st.error(f"XGBoost prediction error: {e}")
@@ -599,17 +434,14 @@ def predictions_page():
     
     model_choice = st.selectbox("Select Model for Prediction", ["CNN", "XGBoost"])
     
-    col1, col2 = st.columns(2)
-    with col1:
+    # Button to load/verify model existence
+    button_label = f"🔄 Verify {model_choice} Model"
+    if st.button(button_label):
         if model_choice == "CNN":
-            if st.button("🔄 Verify CNN Model"):
-                if load_cnn_model():
-                    st.success("CNN model ready for predictions!")
+            load_cnn_model()
         else:
-            if st.button("🔄 Verify XGBoost Model"):
-                if load_xgb_model():
-                    st.success("XGBoost model ready for predictions!")
-    
+            load_xgb_model()
+
     uploaded_file = st.file_uploader("Upload CSV file for prediction", type=["csv"])
     
     if uploaded_file is not None:
@@ -617,99 +449,85 @@ def predictions_page():
             data = pd.read_csv(uploaded_file)
             st.success(f"Successfully uploaded {uploaded_file.name} with {len(data)} records")
             
-            if model_choice == "CNN":
-                if st.session_state.cnn_model is None or st.session_state.scaler_cnn is None:
-                    st.error("Please load the CNN model first")
-                else:
-                    with st.spinner("Making predictions..."):
+            with st.spinner("Making predictions..."):
+                results = None
+                if model_choice == "CNN":
+                    if st.session_state.cnn_model:
                         results = predict_with_cnn(data)
-                        if results is not None:
-                            st.subheader("Prediction Results")
-                            st.dataframe(results.style.apply(
-                                lambda x: ['background-color: ' + COLOR_PALETTE['nebula_purple'] if val == 'Exoplanet' else 'background-color: ' + COLOR_PALETTE['dark_slate'] for val in x],
-                                subset=['Prediction']
-                            ))
-                            
-                            fig_plotly = px.pie(
-                                results,
-                                names='Prediction',
-                                title='Prediction Distribution',
-                                color='Prediction',
-                                color_discrete_map={'Exoplanet': COLOR_PALETTE['nebula_purple'], 'Non-Exoplanet': COLOR_PALETTE['starry_white']}
-                            )
-                            fig_plotly.update_layout(
-                                paper_bgcolor=COLOR_PALETTE['dark_slate'],
-                                plot_bgcolor=COLOR_PALETTE['dark_slate'],
-                                font=dict(color=COLOR_PALETTE['starry_white'])
-                            )
-                            st.plotly_chart(fig_plotly, use_container_width=True)
-            
-            else:  # XGBoost
-                if (st.session_state.xgb_model is None or 
-                    st.session_state.scaler_xgb is None or 
-                    st.session_state.label_encoder is None):
-                    st.error("Please load the XGBoost model first")
-                else:
-                    with st.spinner("Making predictions..."):
+                    else:
+                        st.error("Please verify the CNN model before making predictions.")
+                else: # XGBoost
+                    if st.session_state.xgb_model:
                         results = predict_with_xgb(data)
-                        if results is not None:
-                            st.subheader("Prediction Results")
-                            st.dataframe(results.style.apply(
-                                lambda x: ['background-color: ' + COLOR_PALETTE['nebula_purple'] if val == 'CONFIRMED' else 
-                                         ('background-color: ' + COLOR_PALETTE['starry_white'] if val == 'CANDIDATE' else 'background-color: ' + COLOR_PALETTE['dark_slate']) for val in x],
-                                subset=['Prediction']
-                            ))
-                            
-                            fig_plotly = px.pie(
-                                results,
-                                names='Prediction',
-                                title='Prediction Distribution',
-                                color='Prediction',
-                                color_discrete_map={
-                                    'CONFIRMED': COLOR_PALETTE['nebula_purple'],
-                                    'CANDIDATE': COLOR_PALETTE['starry_white'],
-                                    'FALSE POSITIVE': COLOR_PALETTE['dark_slate']
-                                }
-                            )
-                            fig_plotly.update_layout(
-                                paper_bgcolor=COLOR_PALETTE['dark_slate'],
-                                plot_bgcolor=COLOR_PALETTE['dark_slate'],
-                                font=dict(color=COLOR_PALETTE['starry_white'])
-                            )
-                            st.plotly_chart(fig_plotly, use_container_width=True)
-        
-        except Exception as e:
-            st.error(f"Error processing file: {e}")
+                    else:
+                        st.error("Please verify the XGBoost model before making predictions.")
+                
+                if results is not None:
+                    st.subheader("Prediction Results")
+                    st.dataframe(results)
+                    
+                    st.subheader("Prediction Distribution")
+                    fig_pie = px.pie(
+                        results, names='Prediction', title='Prediction Distribution',
+                        color='Prediction',
+                        color_discrete_map={
+                            'Exoplanet': COLOR_PALETTE['nebula_purple'], 
+                            'Non-Exoplanet': COLOR_PALETTE['starry_white'],
+                            'CONFIRMED': COLOR_PALETTE['nebula_purple'],
+                            'CANDIDATE': COLOR_PALETTE['starry_white'],
+                            'FALSE POSITIVE': '#868e96'
+                        }
+                    )
+                    fig_pie.update_layout(
+                        paper_bgcolor=COLOR_PALETTE['dark_slate'],
+                        plot_bgcolor=COLOR_PALETTE['dark_slate'],
+                        font=dict(color=COLOR_PALETTE['starry_white'])
+                    )
+                    st.plotly_chart(fig_pie, use_container_width=True)
 
-# User Feedback System
-def user_feedback():
-    """Render the user feedback interface"""
-    st.header("💬 Provide Feedback")
+        except Exception as e:
+            st.error(f"Error processing uploaded file: {e}")
+
+# Feedback Page
+def feedback_page():
+    """Render the feedback page"""
+    st.title("💬 Feedback & Suggestions")
+    st.markdown("---")
+    st.write("We value your input! Please use the form below to share your thoughts.")
     
-    with st.form("feedback_form"):
-        name = st.text_input("Your Name (Optional)")
-        rating = st.slider("Rate this dashboard", 1, 5, 3)
-        comments = st.text_area("Suggestions or Comments")
-        
+    with st.form("feedback_form", clear_on_submit=True):
+        feedback_text = st.text_area("Your Feedback", placeholder="What do you like? What could be improved?")
         submitted = st.form_submit_button("Submit Feedback")
         if submitted:
-            st.success("Thank you for your feedback! 🎉")
+            st.success("Thank you for your feedback! We appreciate you helping us improve.")
             st.balloons()
 
-# Main App
+# Main application logic
 def main():
-    """Main application function"""
-    setup_page_config()
+    """Main function to run the Streamlit app"""
     initialize_session_state()
+    setup_page_config()
     
-    raw_data, summary_data = load_data()
-    
-    st.sidebar.title("🌌 Exoplanet Detection")
+    st.sidebar.title("Navigation")
+    page = st.sidebar.radio(
+        "Go to",
+        ["Home", "Data Exploration", "Predictions", "Feedback"],
+        key="navigation_radio"
+    )
     st.sidebar.markdown("---")
-    page = st.sidebar.radio("Navigation", 
-                          ["Home", "Data Exploration", "Predictions", "Feedback"],
-                          index=0)
+    st.sidebar.info(
+        "This dashboard is for educational and demonstration purposes. "
+        "Model training is disabled in this live environment."
+    )
     
+    # Load data only once
+    if not st.session_state.data_loaded:
+        load_data()
+    
+    raw_data = st.session_state.get('raw_data')
+    summary_data = st.session_state.get('summary_data')
+    
+    # Page routing
     if page == "Home":
         landing_page(raw_data)
     elif page == "Data Exploration":
@@ -717,7 +535,7 @@ def main():
     elif page == "Predictions":
         predictions_page()
     elif page == "Feedback":
-        user_feedback()
+        feedback_page()
 
 if __name__ == "__main__":
     main()
