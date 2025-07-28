@@ -145,6 +145,22 @@ def setup_page_config():
         h1, h2, h3, h4, h5, h6, p, div, span {{
             color: {COLOR_PALETTE['starry_white']} !important;
         }}
+        .guide-step {{
+            background-color: {COLOR_PALETTE['nebula_purple']};
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            color: {COLOR_PALETTE['starry_white']};
+            font-size: 16px;
+        }}
+        .guide-tip {{
+            background-color: {COLOR_PALETTE['dark_slate']};
+            padding: 10px;
+            border-radius: 8px;
+            border: 2px solid {COLOR_PALETTE['nebula_purple']};
+            color: {COLOR_PALETTE['starry_white']};
+            font-style: italic;
+        }}
         </style>
     """, unsafe_allow_html=True)
 
@@ -195,7 +211,7 @@ def plot_light_curves(data, n_samples=5):
         exoplanet_samples = data[data['LABEL'] == 2].sample(n=min(n_samples, len(data[data['LABEL'] == 2])))
         non_exoplanet_samples = data[data['LABEL'] == 1].sample(n=min(n_samples, len(data[data['LABEL'] == 1])))
         
-        fig_plotly = make_subplots(rows=1, cols=2, subplot_titles=("Exoplanet Stars", "Non-Exoplanet Stars"))
+        fig_plotly = make_subplots(rows=1, cols=2, subplot_titles=("🌠 Exoplanet Stars", "🌑 Non-Exoplanet Stars"))
         
         for idx, row in exoplanet_samples.iterrows():
             fig_plotly.add_trace(
@@ -249,7 +265,7 @@ def load_cnn_model():
             custom_objects={'focal_loss_fixed': focal_loss(gamma=2.0, alpha=0.5)}
         )
         st.session_state.scaler_cnn = joblib.load('models/scaler_cnn.pkl')
-        st.success("CNN model and scaler loaded successfully!")
+        st.success("CNN model and scaler loaded successfully! 🚀")
         return True
     except Exception as e:
         st.error(f"Error loading CNN model: {e}")
@@ -264,7 +280,7 @@ def load_xgb_model():
         st.session_state.label_encoder = joblib.load('models/label_encoder.pkl')
         st.session_state.features_to_use = joblib.load('models/features_to_use.pkl')
         st.session_state.num_classes = len(st.session_state.label_encoder.classes_)
-        st.success("XGBoost model and components loaded successfully!")
+        st.success("XGBoost model and components loaded successfully! 🌟")
         return True
     except Exception as e:
         st.error(f"Error loading XGBoost model: {e}")
@@ -278,17 +294,17 @@ def landing_page():
     <div style="color: {COLOR_PALETTE['starry_white']}">
     ## Discover Exoplanets Through Machine Learning
     
-    This interactive dashboard allows you to:
-    - Explore exoplanet light curve data
-    - Train and evaluate machine learning models
-    - Make predictions on new observations
+    This interactive dashboard invites you to explore the universe with:
+    - 🌠 Light curve data visualization
+    - 🤖 Advanced model training and evaluation
+    - 🔮 Precise predictions on new observations
     
     ### Key Features:
-    🔭 **Data Exploration**: Visualize light curves and exoplanet characteristics  
-    🤖 **Model Training**: Build CNN and XGBoost classification models  
-    🔮 **Predictions**: Classify new observations as exoplanet or non-exoplanet  
+    🔭 **Data Exploration**: Dive into light curves and exoplanet traits  
+    🤖 **Model Training**: Craft CNN and XGBoost models  
+    🔮 **Predictions**: Identify exoplanets with confidence  
     
-    *Navigate using the sidebar to get started!*
+    *Embark on your cosmic journey using the sidebar!*
     </div>
     """, unsafe_allow_html=True)
     
@@ -296,11 +312,10 @@ def landing_page():
         with st.expander("Getting Started"):
             st.markdown(f"""
             <div style="color: {COLOR_PALETTE['starry_white']}">
-            1. **Data Exploration**: View light curves and dataset statistics
-            2. **Model Training**: Load pre-trained models or train new ones
-            3. **Predictions**: Upload new data for classification
-            
-            Pro Tip: Start with the Data Exploration tab to understand the dataset!
+                <div class="guide-step">1. 🔭 **Data Exploration**: Explore light curves 🌠 and dataset statistics 📊 to understand the cosmic data.</div>
+                <div class="guide-step">2. 🤖 **Model Training**: Load pre-trained models ⚙️ or train your own with cutting-edge techniques.</div>
+                <div class="guide-step">3. 🔮 **Predictions**: Upload new data 📤 and classify exoplanets with ease.</div>
+                <div class="guide-tip">💡 Pro Tip: Start with the *Data Exploration* tab to get a stellar overview of the dataset!</div>
             </div>
             """, unsafe_allow_html=True)
     
@@ -309,7 +324,7 @@ def landing_page():
     if fig_plotly:
         st.plotly_chart(fig_plotly, use_container_width=True)
     else:
-        st.warning("Failed to generate sample light curves.")
+        st.warning("Failed to generate sample light curves. 🌑")
 
 # Prediction Analysis Interface
 def prediction_analysis():
@@ -322,7 +337,7 @@ def prediction_analysis():
         tab1, tab3 = st.tabs(["Confidence Analysis", "Error Analysis"])
         
         with tab1:
-            st.subheader("Prediction Confidence Distribution")
+            st.subheader("Prediction Confidence Distribution 📈")
             try:
                 results['Confidence'] = results['Confidence'].str.rstrip('%').astype(float)
                 fig_plotly = px.histogram(
@@ -349,14 +364,14 @@ def prediction_analysis():
                 st.warning(f"Failed to plot confidence distribution: {str(e)}")
         
         with tab3:
-            st.subheader("Misclassification Analysis")
+            st.subheader("Misclassification Analysis ⚠️")
             st.write("Examples of misclassified observations (placeholder):")
             st.dataframe(results.head().style.apply(
                 lambda x: ['background-color: ' + COLOR_PALETTE['dark_slate'] for val in x],
                 axis=1
             ))
     else:
-        st.warning("No prediction results available. Make predictions first!")
+        st.warning("No prediction results available. Make predictions first! 🌑")
 
 # User Feedback System
 def user_feedback():
@@ -365,7 +380,7 @@ def user_feedback():
     
     with st.form("feedback_form"):
         name = st.text_input("Your Name (Optional)")
-        rating = st.slider("Rate this dashboard", 1, 5, 3)
+        rating = st.slider("Rate this dashboard 🌟", 1, 5, 3)
         comments = st.text_area("Suggestions or Comments")
         
         submitted = st.form_submit_button("Submit Feedback")
@@ -382,7 +397,7 @@ def data_exploration_page(raw_data, summary_data):
     tab1, tab2 = st.tabs(["Light Curve Data", "Summary Data"])
     
     with tab1:
-        st.header("Light Curve Data Overview")
+        st.header("Light Curve Data Overview 🌠")
         
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -394,7 +409,7 @@ def data_exploration_page(raw_data, summary_data):
         
         st.markdown("---")
         
-        st.subheader("Sample Light Curves")
+        st.subheader("Sample Light Curves 🌌")
         n_samples = st.slider("Number of samples to display", 1, 10, 3)
         fig_plotly = plot_light_curves(raw_data, n_samples)
         if fig_plotly:
@@ -402,7 +417,7 @@ def data_exploration_page(raw_data, summary_data):
         
         st.markdown("---")
         
-        st.subheader("Flux Distribution Comparison")
+        st.subheader("Flux Distribution Comparison 📉")
         col1, col2 = st.columns(2)
         
         with col1:
@@ -442,7 +457,7 @@ def data_exploration_page(raw_data, summary_data):
                 st.warning(f"Failed to plot non-exoplanet flux distribution: {str(e)}")
     
     with tab2:
-        st.header("Summary Data Overview")
+        st.header("Summary Data Overview 🌍")
         
         col1, col2 = st.columns(2)
         with col1:
@@ -453,7 +468,7 @@ def data_exploration_page(raw_data, summary_data):
         
         st.markdown("---")
         
-        st.subheader("Exoplanet Dispositions")
+        st.subheader("Exoplanet Dispositions 🪐")
         try:
             fig_plotly = px.pie(
                 summary_data,
@@ -472,7 +487,7 @@ def data_exploration_page(raw_data, summary_data):
         
         st.markdown("---")
         
-        st.subheader("Feature Distributions")
+        st.subheader("Feature Distributions 📊")
         feature = st.selectbox(
             "Select feature to visualize",
             summary_data.select_dtypes(include=[np.number]).columns,
@@ -507,24 +522,24 @@ def model_training_page(raw_data, summary_data):
     tab1, tab2 = st.tabs(["CNN Model", "XGBoost Model"])
     
     with tab1:
-        st.header("Convolutional Neural Network")
+        st.header("Convolutional Neural Network 🧠")
         
         col1, col2 = st.columns(2)
         with col1:
             if st.button("🚀 Load Pre-Trained CNN Model", use_container_width=True):
                 if load_cnn_model():
                     st.markdown("---")
-                    st.subheader("Model Architecture")
+                    st.subheader("Model Architecture 📋")
                     model_summary = []
                     st.session_state.cnn_model.summary(print_fn=lambda x: model_summary.append(x))
                     st.text("\n".join(model_summary))
                     
                     try:
                         if raw_data is None or raw_data.empty:
-                            st.warning("No preprocessed raw data available for predictions.")
+                            st.warning("No preprocessed raw data available for predictions. 🌑")
                         else:
                             st.markdown("---")
-                            st.subheader("Sample Predictions")
+                            st.subheader("Sample Predictions 🔮")
                             sample_data = raw_data.sample(n=min(100, len(raw_data)), random_state=42)
                             results = predict_with_cnn(sample_data)
                             if results is not None:
@@ -542,7 +557,7 @@ def model_training_page(raw_data, summary_data):
                                 )
                                 st.plotly_chart(fig_plotly, use_container_width=True)
                             else:
-                                st.warning("Failed to generate predictions for plotting.")
+                                st.warning("Failed to generate predictions for plotting. ⚠️")
                     except Exception as e:
                         st.warning(f"Could not generate sample predictions plot: {str(e)}")
         
@@ -617,7 +632,7 @@ def model_training_page(raw_data, summary_data):
                         st.session_state.cnn_model = model
                         st.session_state.scaler_cnn = scaler_cnn
                         
-                        st.success("CNN model trained and saved successfully!")
+                        st.success("CNN model trained and saved successfully! 🎉")
                         progress_bar.empty()
                         status_text.empty()
                         
@@ -635,7 +650,7 @@ def model_training_page(raw_data, summary_data):
                             line=dict(color=COLOR_PALETTE['starry_white'])
                         ))
                         fig_plotly.update_layout(
-                            title='Training History',
+                            title='Training History 📈',
                             xaxis_title='Epoch',
                             yaxis_title='Loss',
                             hovermode="x unified",
@@ -652,13 +667,13 @@ def model_training_page(raw_data, summary_data):
         
         if st.session_state.cnn_model:
             st.markdown("---")
-            st.subheader("Model Architecture")
+            st.subheader("Model Architecture 📋")
             model_summary = []
             st.session_state.cnn_model.summary(print_fn=lambda x: model_summary.append(x))
             st.text("\n".join(model_summary))
     
     with tab2:
-        st.header("XGBoost Classifier")
+        st.header("XGBoost Classifier 🌳")
         
         col1, col2 = st.columns(2)
         with col1:
@@ -666,7 +681,7 @@ def model_training_page(raw_data, summary_data):
                 if load_xgb_model():
                     try:
                         st.markdown("---")
-                        st.subheader("Feature Importance")
+                        st.subheader("Feature Importance 📊")
                         X_xgb = summary_data[st.session_state.features_to_use]
                         X_xgb = X_xgb.dropna(axis=1, how='all').replace([np.inf, -np.inf], np.nan)
                         X_xgb = X_xgb.fillna(X_xgb.mean(numeric_only=True))
@@ -769,7 +784,7 @@ def model_training_page(raw_data, summary_data):
                         st.session_state.xgb_model = xgb_model
                         st.session_state.scaler_xgb = scaler_xgb
                         
-                        st.success("XGBoost model trained and saved successfully!")
+                        st.success("XGBoost model trained and saved successfully! 🎉")
                         progress_bar.empty()
                         status_text.empty()
                         
@@ -777,7 +792,7 @@ def model_training_page(raw_data, summary_data):
                             x=st.session_state.features_to_use,
                             y=xgb_model.feature_importances_,
                             labels={'x': 'Features', 'y': 'Importance'},
-                            title='Feature Importance',
+                            title='Feature Importance 📊',
                             color=xgb_model.feature_importances_,
                             color_continuous_scale=[COLOR_PALETTE['dark_slate'], COLOR_PALETTE['nebula_purple'], COLOR_PALETTE['starry_white']]
                         )
@@ -879,27 +894,27 @@ def predictions_page():
         if model_choice == "CNN":
             if st.button("🔄 Verify CNN Model"):
                 if load_cnn_model():
-                    st.success("CNN model ready for predictions!")
+                    st.success("CNN model ready for predictions! 🚀")
         else:
             if st.button("🔄 Verify XGBoost Model"):
                 if load_xgb_model():
-                    st.success("XGBoost model ready for predictions!")
+                    st.success("XGBoost model ready for predictions! 🌟")
     
-    uploaded_file = st.file_uploader("Upload CSV file for prediction", type=["csv"])
+    uploaded_file = st.file_uploader("Upload CSV file for prediction 📤", type=["csv"])
     
     if uploaded_file is not None:
         try:
             data = pd.read_csv(uploaded_file)
-            st.success(f"Successfully uploaded {uploaded_file.name} with {len(data)} records")
+            st.success(f"Successfully uploaded {uploaded_file.name} with {len(data)} records 🌍")
             
             if model_choice == "CNN":
                 if st.session_state.cnn_model is None or st.session_state.scaler_cnn is None:
-                    st.error("Please load the CNN model first")
+                    st.error("Please load the CNN model first ⚠️")
                 else:
                     with st.spinner("Making predictions..."):
                         results = predict_with_cnn(data)
                         if results is not None:
-                            st.subheader("Prediction Results")
+                            st.subheader("Prediction Results 📋")
                             st.dataframe(results.style.apply(
                                 lambda x: ['background-color: ' + COLOR_PALETTE['nebula_purple'] if val == 'Exoplanet' else 'background-color: ' + COLOR_PALETTE['dark_slate'] for val in x],
                                 subset=['Prediction']
@@ -923,12 +938,12 @@ def predictions_page():
                 if (st.session_state.xgb_model is None or 
                     st.session_state.scaler_xgb is None or 
                     st.session_state.label_encoder is None):
-                    st.error("Please load the XGBoost model first")
+                    st.error("Please load the XGBoost model first ⚠️")
                 else:
                     with st.spinner("Making predictions..."):
                         results = predict_with_xgb(data)
                         if results is not None:
-                            st.subheader("Prediction Results")
+                            st.subheader("Prediction Results 📋")
                             st.dataframe(results.style.apply(
                                 lambda x: ['background-color: ' + COLOR_PALETTE['nebula_purple'] if val == 'CONFIRMED' else 
                                          ('background-color: ' + COLOR_PALETTE['starry_white'] if val == 'CANDIDATE' else 'background-color: ' + COLOR_PALETTE['dark_slate']) for val in x],
