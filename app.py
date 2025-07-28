@@ -165,6 +165,43 @@ def setup_page_config():
             font-size: 14px;
             margin-top: 10px;
         }}
+        .video-gallery {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            padding: 20px;
+            background-color: rgba(28, 37, 38, 0.9);
+            border-radius: 10px;
+            margin-top: 20px;
+        }}
+        .video-card {{
+            background-color: {COLOR_PALETTE['dark_slate']};
+            border: 2px solid {COLOR_PALETTE['nebula_purple']};
+            border-radius: 10px;
+            padding: 10px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+            transition: transform 0.3s ease;
+        }}
+        .video-card:hover {{
+            transform: scale(1.05);
+        }}
+        .video-card iframe {{
+            width: 100%;
+            height: 200px;
+            border: none;
+            border-radius: 5px;
+        }}
+        .video-title {{
+            font-size: 16px;
+            font-weight: bold;
+            margin-top: 10px;
+            color: {COLOR_PALETTE['starry_white']};
+        }}
+        .video-desc {{
+            font-size: 12px;
+            color: {COLOR_PALETTE['starry_white']};
+            margin-top: 5px;
+        }}
         </style>
     """, unsafe_allow_html=True)
 
@@ -324,6 +361,28 @@ def landing_page():
                 </div>
                 <div class="guide-tip">
                     💡 <b>Pro Tip:</b> Begin with the <b>Data Exploration</b> tab to get a stellar overview of the dataset!
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+    
+    if st.button("🎥 Video Gallery"):
+        with st.expander("Kepler Mission Videos"):
+            st.markdown(f"""
+            <div class="video-gallery">
+                <div class="video-card">
+                    <iframe src="https://www.youtube.com/embed/_V7J05fK5e0?rel=0" allowfullscreen></iframe>
+                    <div class="video-title">Kepler's Legacy</div>
+                    <div class="video-desc">After 9 years, NASA ends Kepler's science operations, revealing trillions of hidden planets and over 2,600 discoveries, some promising for life.</div>
+                </div>
+                <div class="video-card">
+                    <iframe src="https://www.youtube.com/embed/G99XxEDbNEs?rel=0" allowfullscreen></iframe>
+                    <div class="video-title">Kepler Telescope Found New Planets Better Than Earth</div>
+                    <div class="video-desc">Explore how Kepler's advanced imaging discovered planets, including rocky worlds like Kepler 36b, potentially with atmospheres.</div>
+                </div>
+                <div class="video-card">
+                    <iframe src="https://www.youtube.com/embed/srunrHV0HBk?rel=0" allowfullscreen></iframe>
+                    <div class="video-title">Kepler's Search Beyond Earth</div>
+                    <div class="video-desc">Professor Brian Cox reveals how Kepler's transit method uncovered Earthlike worlds in a single patch of sky, revolutionizing astronomy.</div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
