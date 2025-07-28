@@ -146,20 +146,24 @@ def setup_page_config():
             color: {COLOR_PALETTE['starry_white']} !important;
         }}
         .guide-step {{
-            background-color: {COLOR_PALETTE['nebula_purple']};
-            padding: 10px;
-            border-radius: 8px;
-            margin-bottom: 10px;
+            background-color: rgba(94, 75, 140, 0.8); /* Semi-transparent nebula_purple */
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 15px;
             color: {COLOR_PALETTE['starry_white']};
             font-size: 16px;
+            border: 2px solid {COLOR_PALETTE['nebula_purple']};
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
         }}
         .guide-tip {{
             background-color: {COLOR_PALETTE['dark_slate']};
-            padding: 10px;
-            border-radius: 8px;
-            border: 2px solid {COLOR_PALETTE['nebula_purple']};
+            padding: 12px;
+            border-radius: 10px;
+            border-left: 4px solid {COLOR_PALETTE['nebula_purple']};
             color: {COLOR_PALETTE['starry_white']};
             font-style: italic;
+            font-size: 14px;
+            margin-top: 10px;
         }}
         </style>
     """, unsafe_allow_html=True)
@@ -292,19 +296,16 @@ def landing_page():
     st.title("🌌 Exoplanet Detection Dashboard")
     st.markdown(f"""
     <div style="color: {COLOR_PALETTE['starry_white']}">
-    ## Discover Exoplanets Through Machine Learning
+    <h2>Discover Exoplanets Through Machine Learning</h2>
     
-    This interactive dashboard invites you to explore the universe with:
-    - 🌠 Light curve data visualization
-    - 🤖 Advanced model training and evaluation
-    - 🔮 Precise predictions on new observations
+    <p>This interactive dashboard invites you to explore the universe with:</p>
+    <ul>
+        <li><b>🌠 Light curve data visualization</b></li>
+        <li><b>🤖 Advanced model training and evaluation</b></li>
+        <li><b>🔮 Precise predictions on new observations</b></li>
+    </ul>
     
-    ### Key Features:
-    🔭 **Data Exploration**: Dive into light curves and exoplanet traits  
-    🤖 **Model Training**: Craft CNN and XGBoost models  
-    🔮 **Predictions**: Identify exoplanets with confidence  
-    
-    *Embark on your cosmic journey using the sidebar!*
+    <p><i>Embark on your cosmic journey using the sidebar!</i></p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -312,10 +313,18 @@ def landing_page():
         with st.expander("Getting Started"):
             st.markdown(f"""
             <div style="color: {COLOR_PALETTE['starry_white']}">
-                <div class="guide-step">1. 🔭 **Data Exploration**: Explore light curves 🌠 and dataset statistics 📊 to understand the cosmic data.</div>
-                <div class="guide-step">2. 🤖 **Model Training**: Load pre-trained models ⚙️ or train your own with cutting-edge techniques.</div>
-                <div class="guide-step">3. 🔮 **Predictions**: Upload new data 📤 and classify exoplanets with ease.</div>
-                <div class="guide-tip">💡 Pro Tip: Start with the *Data Exploration* tab to get a stellar overview of the dataset!</div>
+                <div class="guide-step">
+                    <b>Step 1: 🔭 Data Exploration</b> - Explore light curves 🌠 and dataset statistics 📊 to understand the cosmic data.
+                </div>
+                <div class="guide-step">
+                    <b>Step 2: 🤖 Model Training</b> - Load pre-trained models ⚙️ or train your own with cutting-edge techniques.
+                </div>
+                <div class="guide-step">
+                    <b>Step 3: 🔮 Predictions</b> - Upload new data 📤 and classify exoplanets with ease.
+                </div>
+                <div class="guide-tip">
+                    💡 <b>Pro Tip:</b> Begin with the <b>Data Exploration</b> tab to get a stellar overview of the dataset!
+                </div>
             </div>
             """, unsafe_allow_html=True)
     
