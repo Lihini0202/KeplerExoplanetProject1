@@ -14,3 +14,4 @@ streamlit-extras==0.4.2
 h5py==3.8.0
 scipy==1.10.1
 tqdm==4.65.0
+gdown==5.2.0
