@@ -311,52 +311,6 @@ def landing_page():
     else:
         st.warning("Failed to generate sample light curves.")
 
-# Model Comparison Interface
-def model_comparison_interface():
-    """Render the model comparison interface"""
-    st.header("📊 Model Performance Comparison")
-    
-    if st.session_state.cnn_model and st.session_state.xgb_model:
-        comparison_data = pd.DataFrame({
-            'Metric': ['Accuracy', 'Precision', 'Recall', 'F1 Score', 'Training Time'],
-            'CNN': [0.92, 0.89, 0.85, 0.87, '2 min 30 sec'],
-            'XGBoost': [0.88, 0.91, 0.82, 0.86, '45 sec']
-        })
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.dataframe(comparison_data.style.apply(
-                lambda x: ['background-color: ' + COLOR_PALETTE['dark_slate'] for val in x],
-                axis=1
-            ))
-        
-        with col2:
-            fig_plotly = px.bar(
-                comparison_data.melt(id_vars='Metric'), 
-                x='Metric', 
-                y='value', 
-                color='variable',
-                barmode='group', 
-                title='Model Comparison',
-                color_discrete_map={'CNN': COLOR_PALETTE['nebula_purple'], 'XGBoost': COLOR_PALETTE['starry_white']}
-            )
-            fig_plotly.update_layout(
-                paper_bgcolor=COLOR_PALETTE['dark_slate'],
-                plot_bgcolor=COLOR_PALETTE['dark_slate'],
-                font=dict(color=COLOR_PALETTE['starry_white'])
-            )
-            st.plotly_chart(fig_plotly, use_container_width=True)
-        
-        st.markdown(f"""
-        <div style="color: {COLOR_PALETTE['starry_white']}">
-        ### When to use each model:
-        - **CNN**: Best for raw light curve data, captures temporal patterns  
-        - **XGBoost**: Best for tabular feature data, faster training  
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.warning("Please load both CNN and XGBoost models to enable comparison")
-
 # Prediction Analysis Interface
 def prediction_analysis():
     """Render the prediction analysis interface"""
@@ -1017,8 +971,7 @@ def main():
     st.sidebar.markdown("---")
     page = st.sidebar.radio("Navigation", 
                           ["Home", "Data Exploration", "Model Training", 
-                           "Model Comparison", "Predictions", 
-                           "Prediction Analysis", "Feedback"],
+                           "Predictions", "Prediction Analysis", "Feedback"],
                           index=0)
     
     if page == "Home":
@@ -1027,8 +980,6 @@ def main():
         data_exploration_page(raw_data, summary_data)
     elif page == "Model Training":
         model_training_page(raw_data, summary_data)
-    elif page == "Model Comparison":
-        model_comparison_interface()
     elif page == "Predictions":
         predictions_page()
     elif page == "Prediction Analysis":
