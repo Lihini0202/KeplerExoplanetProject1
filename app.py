@@ -724,7 +724,7 @@ def model_training_page(raw_data, summary_data):
                             labels={'x': 'Features', 'y': 'Importance'},
                             title='Feature Importance (Pre-Trained Model)',
                             color=st.session_state.xgb_model.feature_importances_,
-                            color_continuous_map=[COLOR_PALETTE['dark_slate'], COLOR_PALETTE['nebula_purple'], COLOR_PALETTE['starry_white']]
+                            color_continuous_scale=[COLOR_PALETTE['dark_slate'], COLOR_PALETTE['nebula_purple'], COLOR_PALETTE['starry_white']]
                         )
                         fig_plotly.update_layout(
                             xaxis_tickangle=-45,
@@ -825,7 +825,7 @@ def model_training_page(raw_data, summary_data):
                             labels={'x': 'Features', 'y': 'Importance'},
                             title='Feature Importance',
                             color=xgb_model.feature_importances_,
-                            color_continuous_map=[COLOR_PALETTE['dark_slate'], COLOR_PALETTE['nebula_purple'], COLOR_PALETTE['starry_white']]
+                            color_continuous_scale=[COLOR_PALETTE['dark_slate'], COLOR_PALETTE['nebula_purple'], COLOR_PALETTE['starry_white']]
                         )
                         fig_plotly.update_layout(
                             xaxis_tickangle=-45,
